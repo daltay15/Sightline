@@ -1,0 +1,1500 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Detections</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{font-family:system-ui,Arial,sans-serif}
+    body{margin:0;background:#0b0c10;color:#e8e8e8}
+    header{padding:14px 18px;background:#111318;position:sticky;top:0;z-index:10;display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+    header h1{margin:0;font-size:18px;font-weight:700}
+    .nav{display:flex;gap:8px;flex-wrap:wrap}
+    .nav a{background:#171a21;color:#e8e8e8;border:1px solid #2a2f3a;border-radius:8px;padding:8px 10px;text-decoration:none;transition:all 0.2s}
+    .nav a:hover{background:#2a2f3a}
+    .nav a.active{background:#375dfb;border-color:#375dfb;color:#fff}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+    input,button{background:#171a21;color:#e8e8e8;border:1px solid #2a2f3a;border-radius:8px;padding:8px 10px}
+    button.primary{background:#375dfb;border-color:#375dfb;color:#fff}
+    main{padding:16px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;contain:layout style paint}
+    
+    /* Dynamic grid sizes */
+    .grid-1{grid-template-columns:1fr}
+    .grid-2{grid-template-columns:repeat(2,1fr)}
+    .grid-3{grid-template-columns:repeat(3,1fr)}
+    .grid-4{grid-template-columns:repeat(4,1fr)}
+    .grid-5{grid-template-columns:repeat(5,1fr)}
+    .grid-6{grid-template-columns:repeat(6,1fr)}
+    .grid-7{grid-template-columns:repeat(7,1fr)}
+    .grid-8{grid-template-columns:repeat(8,1fr)}
+    
+    /* Mobile responsive grid - intelligent scaling for large grids */
+    @media (max-width:768px){
+      .grid-3{grid-template-columns:repeat(3,1fr)}
+      .grid-4{grid-template-columns:repeat(4,1fr)}
+      .grid-5,.grid-6,.grid-7,.grid-8{grid-template-columns:repeat(4,1fr)}
+    }
+    
+    @media (max-width:480px){
+      .grid-2{grid-template-columns:repeat(2,1fr)}
+      .grid-3,.grid-4,.grid-5,.grid-6,.grid-7,.grid-8{grid-template-columns:repeat(2,1fr)}
+    }
+    .card{contain:layout style paint;will-change:transform}
+    .card{background:#111318;border:1px solid #2a2f3a;border-radius:14px;overflow:hidden;position:relative}
+    .card.has-detections{border-color:#44ff44;box-shadow:0 0 10px rgba(68,255,68,0.3)}
+    .thumb{width:100%;display:block;aspect-ratio:16/9;object-fit:cover;background:#0f1116;cursor:pointer;transition:all 0.2s}
+    .thumb:hover{opacity:0.9;transform:scale(1.02)}
+    .thumb:active{transform:scale(0.98)}
+    .meta{padding:12px;font-size:12px;opacity:.85;display:flex;justify-content:space-between;gap:6px}
+    .camera{font-weight:600}
+    .ts{opacity:.8}
+    .detection-info{background:#1a1d29;border:1px solid #2a2f3a;border-radius:8px;padding:8px;margin-top:8px;font-size:11px}
+    .detection-badges{position:absolute;top:8px;right:8px;display:flex;gap:4px;flex-wrap:wrap;max-width:120px;}
+    .detection-badge{padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(0,0,0,0.7);color:white;}
+    .detection-badge.person{background:rgba(68,255,68,0.8);}
+    .detection-badge.car{background:rgba(68,136,255,0.8);}
+    .detection-badge.truck{background:rgba(255,136,68,0.8);}
+    .detection-badge.bicycle{background:rgba(255,68,255,0.8);}
+    .detection-badge.motorcycle{background:rgba(255,255,68,0.8);color:#000;}
+    .detection-badge.bird{background:rgba(68,255,255,0.8);color:#000;}
+    .detection-badge.dog{background:rgba(255,165,0,0.8);color:#000;}
+    .empty{opacity:.6;text-align:center;padding:40px 0}
+    .fullscreen{position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:1000;display:none;align-items:center;justify-content:center;cursor:pointer}
+    .fullscreen img{max-width:100%;max-height:100%;object-fit:contain;transition:opacity 0.3s;cursor:pointer}
+    .fullscreen img:hover{opacity:0.9}
+    .fullscreen-close{position:absolute;top:20px;right:20px;background:rgba(0,0,0,0.7);color:white;border:none;padding:10px 15px;border-radius:5px;cursor:pointer;font-size:16px;z-index:1001}
+    .fullscreen-loading{color:white;font-size:18px;opacity:0.8}
+    .status{background:#1a1d29;border:1px solid #2a2f3a;border-radius:8px;padding:8px 12px;font-size:12px;opacity:.8}
+    .status.loading{opacity:1;background:#375dfb20;border-color:#375dfb}
+    .status.error{background:#ff444420;border-color:#ff4444;color:#ff6666}
+    .status.success{background:#44ff4420;border-color:#44ff44;color:#66ff66}
+    .comparison-view{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .comparison-view button{background:#2a2f3a;border:1px solid #444;color:#e8e8e8;padding:4px 8px;border-radius:4px;font-size:10px;cursor:pointer}
+    .comparison-view button.active{background:#375dfb;border-color:#375dfb;color:#fff}
+    .date-shortcuts{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+    .date-shortcuts button{background:#2a2f3a;border:1px solid #444;color:#e8e8e8;padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;transition:all 0.2s}
+    .date-shortcuts button:hover{background:#375dfb;border-color:#375dfb;color:#fff}
+    
+    /* Mobile Navigation Styles */
+    .mobile-menu-toggle {
+      display: none;
+      background: #171a21;
+      color: #e8e8e8;
+      border: 1px solid #2a2f3a;
+      border-radius: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 0.3s ease;
+    }
+    
+    .mobile-menu-toggle:hover {
+      background: #2a2f3a;
+      transform: scale(1.05);
+    }
+    
+    .mobile-menu-toggle .hamburger {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    
+    .mobile-menu-toggle .hamburger span {
+      width: 18px;
+      height: 2px;
+      background: #e8e8e8;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 1px;
+    }
+    
+    .mobile-menu-toggle.active .hamburger span:nth-child(1) {
+      transform: rotate(45deg) translate(5px, 5px);
+    }
+    
+    .mobile-menu-toggle.active .hamburger span:nth-child(2) {
+      opacity: 0;
+      transform: scaleX(0);
+    }
+    
+    .mobile-menu-toggle.active .hamburger span:nth-child(3) {
+      transform: rotate(-45deg) translate(7px, -6px);
+    }
+    
+    .mobile-nav {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #111318;
+      border: 1px solid #2a2f3a;
+      border-top: none;
+      border-radius: 0 0 12px 12px;
+      padding: 16px;
+      z-index: 1000;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(10px);
+      transform: translateY(-10px);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .mobile-nav.show {
+      display: block;
+      transform: translateY(0);
+      opacity: 1;
+    }
+    
+    .mobile-nav .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .mobile-nav .nav a {
+      background: #171a21;
+      color: #e8e8e8;
+      border: 1px solid #2a2f3a;
+      border-radius: 10px;
+      padding: 14px 18px;
+      text-decoration: none;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      text-align: center;
+      font-weight: 500;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .mobile-nav .nav a::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(55, 93, 251, 0.1), transparent);
+      transition: left 0.5s;
+    }
+    
+    .mobile-nav .nav a:hover::before {
+      left: 100%;
+    }
+    
+    .mobile-nav .nav a:hover {
+      background: #2a2f3a;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(55, 93, 251, 0.2);
+    }
+    
+    .mobile-nav .nav a.active {
+      background: linear-gradient(135deg, #375dfb, #4a6cf7);
+      border-color: #375dfb;
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(55, 93, 251, 0.3);
+    }
+    
+    .mobile-controls {
+      display: none;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #2a2f3a;
+    }
+    
+    .mobile-controls .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-left: 0;
+    }
+    
+    .mobile-controls input,
+    .mobile-controls button,
+    .mobile-controls select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: all 0.3s ease;
+    }
+    
+    .mobile-controls input:focus,
+    .mobile-controls select:focus {
+      outline: none;
+      border-color: #375dfb;
+      box-shadow: 0 0 0 3px rgba(55, 93, 251, 0.1);
+    }
+    
+    .mobile-controls button {
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+    
+    .mobile-controls button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    
+    .mobile-controls button.primary {
+      background: linear-gradient(135deg, #375dfb, #4a6cf7);
+      border: none;
+      box-shadow: 0 2px 8px rgba(55, 93, 251, 0.3);
+    }
+    
+    .mobile-controls button.primary:hover {
+      box-shadow: 0 4px 16px rgba(55, 93, 251, 0.4);
+    }
+    
+    .date-range-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    
+    .date-inputs {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .date-input-group {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    
+    .date-input-group label {
+      font-size: 12px;
+      color: #e8e8e8;
+      opacity: 0.8;
+      font-weight: 500;
+    }
+    
+    .date-input-group input {
+      width: 100%;
+      min-width: 0;
+    }
+    
+    .mobile-controls .date-shortcuts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0;
+    }
+    
+    .mobile-controls .date-shortcuts button {
+      flex: 1;
+      min-width: 0;
+      padding: 8px 6px;
+      font-size: 11px;
+      background: #2a2f3a;
+      border: 1px solid #444;
+      color: #e8e8e8;
+      border-radius: 6px;
+      transition: all 0.3s ease;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .mobile-controls .date-shortcuts button:hover {
+      background: #375dfb;
+      border-color: #375dfb;
+      color: #fff;
+      transform: translateY(-1px);
+    }
+    
+    .filters-toggle {
+      margin-bottom: 8px;
+    }
+    
+    .grid-size-section {
+      margin: 16px 0;
+      padding: 16px;
+      background: #1a1d26;
+      border: 1px solid #2a2f3a;
+      border-radius: 12px;
+    }
+    
+    .grid-size-section h4 {
+      margin: 0 0 12px 0;
+      color: #e8e8e8;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    
+    .grid-size-section select {
+      width: 100%;
+      padding: 12px 16px;
+      background: #171a21;
+      color: #e8e8e8;
+      border: 1px solid #2a2f3a;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: all 0.3s ease;
+    }
+    
+    .grid-size-section select:focus {
+      outline: none;
+      border-color: #375dfb;
+      box-shadow: 0 0 0 3px rgba(55, 93, 251, 0.1);
+    }
+    
+    .filters-toggle-btn {
+      width: 100%;
+      background: #1a1d29;
+      border: 1px solid #2a2f3a;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #e8e8e8;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.3s ease;
+    }
+    
+    .filters-toggle-btn:hover {
+      background: #2a2f3a;
+      border-color: #375dfb;
+    }
+    
+    .toggle-arrow {
+      transition: transform 0.3s ease;
+      font-size: 12px;
+    }
+    
+    .filters-toggle-btn.active .toggle-arrow {
+      transform: rotate(180deg);
+    }
+    
+    .filters-section {
+      background: #1a1d29;
+      border: 1px solid #2a2f3a;
+      border-radius: 8px;
+      max-height: 0;
+      overflow: hidden;
+      padding: 0;
+      margin: 0;
+      transition: max-height 0.3s ease, padding 0.3s ease, margin 0.3s ease, border 0.3s ease;
+      border-width: 0;
+    }
+    
+    .filters-section.open {
+      max-height: 1000px;
+      padding: 12px;
+      margin-bottom: 12px;
+      border-width: 1px;
+    }
+    
+    .actions-section {
+      background: #1a1d29;
+      border: 1px solid #2a2f3a;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    
+    .actions-section h4 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: #375dfb;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    
+    .action-buttons button {
+      flex: 1;
+    }
+  }
+  
+  /* Mobile scroll-to-top button */
+  .scroll-to-top {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 50px;
+    height: 50px;
+    background: #375dfb;
+    border: none;
+    border-radius: 50%;
+    color: white;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(55, 93, 251, 0.3);
+  }
+  
+  .scroll-to-top.visible {
+    opacity: 1;
+    visibility: visible;
+  }
+  
+  .scroll-to-top:hover {
+    background: #2a4ae8;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(55, 93, 251, 0.4);
+  }
+  
+  .scroll-to-top:active {
+    transform: translateY(0);
+  }
+  
+  /* Mobile floating date indicator */
+  .floating-date {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 999;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  
+  .floating-date.visible {
+    opacity: 1;
+    visibility: visible;
+  }
+  
+  /* Mobile scroll progress indicator */
+  .scroll-progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 0%;
+    height: 3px;
+    background: linear-gradient(90deg, #375dfb, #2a4ae8);
+    z-index: 1001;
+    transition: width 0.1s ease;
+  }
+  
+    
+    /* Mobile responsive styles */
+    @media (max-width: 768px) {
+      header {
+        flex-wrap: wrap;
+        position: relative;
+        padding: 12px 16px;
+      }
+      
+      header h1 {
+        font-size: 16px;
+      }
+      
+      .nav {
+        display: none;
+      }
+      
+      .controls {
+        display: none;
+      }
+      
+      .mobile-menu-toggle {
+        display: block;
+        margin-left: auto;
+      }
+      
+      .mobile-nav .mobile-controls {
+        display: block;
+      }
+      
+      main {
+        padding: 16px;
+      }
+      
+      .grid {
+        gap: 12px;
+      }
+      
+      .card {
+        border-radius: 12px;
+      }
+      
+      .thumb {
+        border-radius: 8px;
+      }
+      
+      .meta {
+        padding: 10px;
+        font-size: 11px;
+      }
+      
+      .detection-badges {
+        max-width: 100px;
+      }
+      
+      .detection-badge {
+        font-size: 9px;
+        padding: 1px 4px;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      header {
+        padding: 10px 12px;
+      }
+      
+      header h1 {
+        font-size: 14px;
+      }
+      
+      main {
+        padding: 12px;
+      }
+      
+      .grid {
+        /* User choice respected */
+      }
+      
+      .card {
+        border-radius: 10px;
+      }
+      
+      .meta {
+        padding: 8px;
+        font-size: 10px;
+      }
+      
+      .detection-badges {
+        max-width: 80px;
+      }
+      
+      .detection-badge {
+        font-size: 8px;
+        padding: 1px 3px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Detections</h1>
+    <nav class="nav">
+      <a href="/ui/detections.html" class="active">AI Detections</a>
+      <a href="/ui/events.html">Events</a>
+      <a href="/ui/stats.html">Stats</a>
+      <a href="/ui/about.html">About</a>
+    </nav>
+    <div class="controls">
+      <select id="camera">
+        <option value="">All Cameras</option>
+      </select>
+      <input id="from" type="date">
+      <input id="to" type="date">
+      <div class="date-shortcuts">
+        <button type="button" onclick="setDateRange('today')">Today</button>
+        <button type="button" onclick="setDateRange('yesterday')">Yesterday</button>
+        <button type="button" onclick="setDateRange('week')">This Week</button>
+        <button type="button" onclick="setDateRange('month')">This Month</button>
+        <button type="button" onclick="setDateRange('all')">All Time</button>
+      </div>
+      <select id="detectionType">
+        <option value="">All Detections</option>
+        <option value="person">👤 People Only</option>
+        <option value="car">🚗 Cars Only</option>
+        <option value="truck">🚛 Trucks Only</option>
+        <option value="bicycle">🚲 Bicycles Only</option>
+        <option value="motorcycle">🏍️ Motorcycles Only</option>
+        <option value="bird">🐦 Birds Only</option>
+        <option value="dog">🐕 Dogs Only</option>
+        <option value="high-confidence">High Confidence</option>
+      </select>
+      <select id="gridSize">
+        <option value="1">1 per row</option>
+        <option value="2">2 per row</option>
+        <option value="3">3 per row</option>
+        <option value="4">4 per row</option>
+        <option value="5">5 per row</option>
+        <option value="6">6 per row</option>
+        <option value="7">7 per row</option>
+        <option value="8" selected>8 per row</option>
+      </select>
+      <button id="toggleView" class="primary">🔍 Detection Images Only</button>
+      <button id="apply" class="primary">Apply</button>
+      <button id="reset">Reset</button>
+      <button id="refresh">Refresh</button>
+    </div>
+    <span id="count"></span>
+    <button class="mobile-menu-toggle" id="mobileMenuToggle">
+      <div class="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </button>
+    <div id="status" class="status" style="display:none"></div>
+    
+    <!-- Mobile Navigation -->
+    <div class="mobile-nav" id="mobileNav">
+      <nav class="nav">
+        <a href="/ui/detections.html" class="active">AI Detections</a>
+        <a href="/ui/events.html">Events</a>
+        <a href="/ui/stats.html">Stats</a>
+        <a href="/ui/about.html">About</a>
+      </nav>
+      <div class="mobile-controls">
+        <div class="controls">
+          <div class="filters-toggle">
+            <button id="mobileFiltersToggle" class="filters-toggle-btn">
+              <span>📋 Filters</span>
+              <span class="toggle-arrow">▼</span>
+            </button>
+          </div>
+          
+          <div class="filters-section" id="mobileFiltersSection">
+            <select id="mobileCamera">
+              <option value="">All Cameras</option>
+            </select>
+            <div class="date-range-container">
+              <div class="date-inputs">
+                <div class="date-input-group">
+                  <label for="mobileFrom">📅 From</label>
+                  <input id="mobileFrom" type="date" placeholder="From">
+                </div>
+                <div class="date-input-group">
+                  <label for="mobileTo">📅 To</label>
+                  <input id="mobileTo" type="date" placeholder="To">
+                </div>
+              </div>
+              <div class="date-shortcuts">
+                <button type="button" onclick="setMobileDateRange('today')">Today</button>
+                <button type="button" onclick="setMobileDateRange('yesterday')">Yesterday</button>
+                <button type="button" onclick="setMobileDateRange('week')">This Week</button>
+                <button type="button" onclick="setMobileDateRange('month')">This Month</button>
+                <button type="button" onclick="setMobileDateRange('all')">All Time</button>
+              </div>
+            </div>
+            <select id="mobileDetectionType">
+              <option value="">All Detections</option>
+              <option value="person">👤 People Only</option>
+              <option value="car">🚗 Cars Only</option>
+              <option value="truck">🚛 Trucks Only</option>
+              <option value="bicycle">🚲 Bicycles Only</option>
+              <option value="motorcycle">🏍️ Motorcycles Only</option>
+              <option value="bird">🐦 Birds Only</option>
+              <option value="dog">🐕 Dogs Only</option>
+              <option value="high-confidence">High Confidence</option>
+            </select>
+          </div>
+          
+          <div class="grid-size-section">
+            <h4>📐 Grid Size</h4>
+            <select id="mobileGridSize">
+              <option value="1">1 per row</option>
+              <option value="2" selected>2 per row</option>
+              <option value="3">3 per row</option>
+              <option value="4">4 per row</option>
+              <option value="5">5 per row</option>
+              <option value="6">6 per row</option>
+              <option value="7">7 per row</option>
+              <option value="8">8 per row</option>
+            </select>
+          </div>
+          
+          <div class="actions-section">
+            <h4>🎛️ Actions</h4>
+            <button id="mobileToggleView" class="primary">🔍 Detection Images Only</button>
+            <div class="action-buttons">
+              <button id="mobileApply" class="primary">Apply</button>
+              <button id="mobileReset">Reset</button>
+              <button id="mobileRefresh">Refresh</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" style="display:none">No detection images found.</div>
+  </main>
+  
+  <!-- Fullscreen image overlay -->
+  <div id="fullscreen" class="fullscreen">
+    <div id="fullscreen-loading" class="fullscreen-loading" style="display:none">Loading...</div>
+    <img id="fullscreen-img" src="" alt="Fullscreen image" style="display:none">
+    <button id="fullscreen-close" class="fullscreen-close">✕ Close</button>
+  </div>
+
+<script>
+const grid = document.getElementById('grid');
+const empty = document.getElementById('empty');
+const count = document.getElementById('count');
+const status = document.getElementById('status');
+const fullscreen = document.getElementById('fullscreen');
+const fullscreenImg = document.getElementById('fullscreen-img');
+const fullscreenClose = document.getElementById('fullscreen-close');
+const fullscreenLoading = document.getElementById('fullscreen-loading');
+
+let paging = {
+  limit: 100,
+  offset: 0,
+  total: 0,
+  nextOffset: 0,
+  loading: false,
+  params: {}
+};
+let sentinel;
+let autoRefreshInterval;
+let lastEventCount = 0;
+let debounceTimer;
+let showDetectionImagesOnly = false;
+
+function qs(obj){const u=new URLSearchParams();for(const[k,v]of Object.entries(obj)) if(v!==''&&v!=null) u.append(k,String(v)); return u.toString();}
+function fmtMB(b){return (b/1e6).toFixed(1)+' MB';}
+function fmtTs(s){
+  // Convert Unix timestamp to Central Time and format with timezone info
+  const date = new Date(s*1000);
+  return date.toLocaleString('en-US', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: '2-digit', 
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }) + ' CT';
+}
+
+async function fetchEvents(params={}) {
+  // If showing detection images only, filter for DETECTION camera
+  if (showDetectionImagesOnly) {
+    params.camera = 'DETECTION';
+  }
+  
+  // Use enhanced endpoint for detection data
+  const res = await fetch('/events/enhanced?' + qs(params));
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  return res.json();
+}
+
+function showStatus(message, type = 'loading') {
+  status.textContent = message;
+  status.className = `status ${type}`;
+  status.style.display = 'block';
+}
+
+function hideStatus() {
+  status.style.display = 'none';
+}
+
+function openFullscreen(imageSrc) {
+  fullscreen.style.display = 'flex';
+  fullscreenLoading.style.display = 'block';
+  fullscreenImg.style.display = 'none';
+  document.body.style.overflow = 'hidden';
+  
+  fullscreenImg.onload = () => {
+    fullscreenLoading.style.display = 'none';
+    fullscreenImg.style.display = 'block';
+    fullscreenImg.onclick = (e) => {
+      e.stopPropagation();
+      closeFullscreen();
+    };
+  };
+  
+  fullscreenImg.onerror = () => {
+    fullscreenLoading.textContent = 'Failed to load image';
+    fullscreenLoading.style.display = 'block';
+  };
+  
+  fullscreenImg.src = imageSrc;
+}
+
+function closeFullscreen() {
+  fullscreen.style.display = 'none';
+  fullscreenImg.src = '';
+  document.body.style.overflow = 'auto';
+}
+
+function card(e){
+  const div = document.createElement('div'); 
+  div.className = 'card';
+  
+  // Add has-detections class if there are detections
+  if (e.detections && e.detections.length > 0) {
+    div.classList.add('has-detections');
+  }
+  
+  const img = document.createElement('img'); 
+  img.className = 'thumb'; 
+  img.loading = 'lazy'; 
+  img.decoding = 'async';
+  
+  // Determine which image to show based on event type and toggle state
+  if (e.camera === 'DETECTION') {
+    // This is a detection image event
+    img.src = '/detection/' + e.id;
+    img.title = 'Detection Image';
+  } else if (e.detectionData) {
+    // This is an original event with detection data
+    try {
+      const detectionData = JSON.parse(e.detectionData);
+      if (detectionData.annotated_image) {
+        img.src = '/detection/' + e.id;
+        img.title = 'Detection Image';
+      } else {
+        img.src = '/thumb/' + e.id;
+        img.title = 'Original Image (no detection image available)';
+      }
+    } catch (err) {
+      img.src = '/thumb/' + e.id;
+      img.title = 'Original Image';
+    }
+  } else {
+    // This is an original event without detection data
+    img.src = '/thumb/' + e.id;
+    img.title = 'Original Image';
+  }
+  
+  img.onerror = () => { 
+    img.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="169" viewBox="0 0 300 169"><rect width="300" height="169" fill="%230f1116"/><text x="50%" y="50%" text-anchor="middle" dy=".3em" fill="%23ff6666">File Deleted</text></svg>'; 
+    img.style.cursor = 'not-allowed';
+    img.title = 'Original file has been deleted';
+  };
+  div.appendChild(img);
+  
+  // Add detection badges if available
+  if (e.detections && e.detections.length > 0) {
+    const badges = document.createElement('div');
+    badges.className = 'detection-badges';
+    
+    // Group detections by type and show count
+    const detectionCounts = {};
+    e.detections.forEach(det => {
+      detectionCounts[det.type] = (detectionCounts[det.type] || 0) + 1;
+    });
+    
+    Object.entries(detectionCounts).forEach(([type, count]) => {
+      const badge = document.createElement('div');
+      badge.className = `detection-badge ${type}`;
+      
+      const icon = type === 'person' ? '👤' : 
+                   type === 'car' ? '🚗' : 
+                   type === 'truck' ? '🚛' : 
+                   type === 'bicycle' ? '🚲' : 
+                   type === 'motorcycle' ? '🏍️' : 
+                   type === 'bird' ? '🐦' : 
+                   type === 'dog' ? '🐕' : '🔍';
+      
+      badge.textContent = `${icon} ${count}`;
+      badge.title = `${count} ${type}${count > 1 ? 's' : ''} detected`;
+      badges.appendChild(badge);
+    });
+    
+    div.appendChild(badges);
+  }
+  
+  const meta = document.createElement('div'); 
+  meta.className = 'meta';
+  const left = document.createElement('div'); 
+  left.innerHTML = `<div class="camera">${e.camera||'—'}</div><div class="ts">${fmtTs(e.startTs)}</div>`;
+  const right = document.createElement('div'); 
+  right.textContent = fmtMB(e.sizeBytes);
+  meta.append(left, right); 
+  div.appendChild(meta);
+  
+  // Add detection info
+  if (e.detections && e.detections.length > 0) {
+    const detectionInfo = document.createElement('div');
+    detectionInfo.className = 'detection-info';
+    
+    const detectionText = e.detections.map(det => 
+      `${det.type} (${(det.confidence * 100).toFixed(1)}%)`
+    ).join(', ');
+    
+    detectionInfo.textContent = `Detected: ${detectionText}`;
+    div.appendChild(detectionInfo);
+    
+    // Add comparison view buttons
+    const comparisonView = document.createElement('div');
+    comparisonView.className = 'comparison-view';
+    
+    const originalBtn = document.createElement('button');
+    originalBtn.textContent = 'Original';
+    originalBtn.onclick = (e) => {
+      e.stopPropagation();
+      img.src = '/thumb/' + e.id;
+      img.title = 'Original Image';
+      originalBtn.classList.add('active');
+      detectionBtn.classList.remove('active');
+    };
+    
+    const detectionBtn = document.createElement('button');
+    detectionBtn.textContent = 'Detection';
+    detectionBtn.classList.add('active');
+    detectionBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (e.detectionData) {
+        try {
+          const detectionData = JSON.parse(e.detectionData);
+          if (detectionData.annotated_image) {
+            img.src = '/detection/' + e.id;
+            img.title = 'Detection Image';
+          }
+        } catch (err) {
+          // Fallback to original
+        }
+      }
+      detectionBtn.classList.add('active');
+      originalBtn.classList.remove('active');
+    };
+    
+    comparisonView.appendChild(originalBtn);
+    comparisonView.appendChild(detectionBtn);
+    div.appendChild(comparisonView);
+  }
+  
+  // Image click handler
+  img.onclick = () => {
+    openFullscreen(img.src);
+  };
+  
+  return div;
+}
+
+function installSentinel(){
+  if (sentinel) sentinel.remove();
+  sentinel = document.createElement('div');
+  sentinel.style.height='1px';
+  grid.appendChild(sentinel);
+
+  const io = new IntersectionObserver(async (entries)=>{
+    if (!entries[0].isIntersecting) return;
+    if (paging.loading) return;
+    if (paging.nextOffset == null) return;
+    await loadPage(true);
+  }, {rootMargin: '800px'});
+  io.observe(sentinel);
+}
+
+async function loadPage(append=false){
+  paging.loading = true;
+  empty.style.display = 'none';
+  count.textContent = append ? 'Loading more…' : 'Loading…';
+  
+  if (!append) {
+    showStatus('Loading detection images...', 'loading');
+  }
+
+  const params = {...paging.params, limit: paging.limit, offset: append ? paging.nextOffset : 0};
+  try {
+    const data = await fetchEvents(params);
+    const items = data.items || [];
+    paging.total = data.total ?? 0;
+    paging.offset = data.offset ?? 0;
+    paging.nextOffset = data.nextOffset ?? null;
+
+    if (!append) grid.innerHTML = '';
+    if (!items.length && !append) { 
+      empty.style.display='block'; 
+      count.textContent='0 shown'; 
+      showStatus('No detection images found.', 'loading');
+      paging.loading=false; 
+      return; 
+    }
+
+    const frag = document.createDocumentFragment();
+    for (const e of items) frag.appendChild(card(e));
+    grid.appendChild(frag);
+
+    const shown = (data.offset||0) + items.length;
+    count.textContent = `${shown} / ${paging.total} shown`;
+    
+    if (!append) {
+      hideStatus();
+    }
+
+    installSentinel();
+  } catch (e) {
+    console.error(e);
+    if (!append) { 
+      grid.innerHTML=''; 
+      empty.style.display='block'; 
+      empty.textContent='Failed to load.'; 
+      count.textContent='Error';
+      showStatus('Failed to load detection images', 'error');
+    }
+  } finally {
+    paging.loading = false;
+  }
+}
+
+function applyFilters(){
+  const camera = document.getElementById('camera').value.trim();
+  const from = document.getElementById('from').value;
+  const to = document.getElementById('to').value;
+  const detectionType = document.getElementById('detectionType').value;
+
+  const p = {};
+  if (camera) p.camera = camera;
+  if (from) p.from = Math.floor(new Date(from+'T00:00:00Z').getTime()/1000);
+  if (to)   p.to   = Math.floor(new Date(to+'T23:59:59Z').getTime()/1000);
+  
+  // Handle detection filters
+  if (detectionType) {
+    if (detectionType === 'high-confidence') {
+      p.minConfidence = 0.8;
+    } else {
+      p.detectionType = detectionType;
+    }
+  }
+
+  paging.params = p;
+  paging.nextOffset = 0;
+  loadPage(false);
+}
+
+document.getElementById('apply').onclick = applyFilters;
+document.getElementById('reset').onclick = ()=>{
+  ['camera','from','to','detectionType'].forEach(id=>document.getElementById(id).value='');
+  paging.params = {};
+  paging.nextOffset = 0;
+  populateCameraDropdown(); // Refresh camera dropdown
+  loadPage(false);
+};
+document.getElementById('refresh').onclick = ()=>{
+  loadPage(false);
+};
+
+// Toggle view between detection images only and all events
+document.getElementById('toggleView').onclick = ()=>{
+  showDetectionImagesOnly = !showDetectionImagesOnly;
+  const button = document.getElementById('toggleView');
+  if (showDetectionImagesOnly) {
+    button.textContent = '🖼️ Show All Events';
+    button.style.background = '#44ff44';
+    button.style.borderColor = '#44ff44';
+  } else {
+    button.textContent = '🔍 Detection Images Only';
+    button.style.background = '#375dfb';
+    button.style.borderColor = '#375dfb';
+  }
+  
+  // Reload the current page to update the view
+  loadPage(false);
+};
+
+// Fullscreen event listeners
+fullscreenClose.onclick = closeFullscreen;
+fullscreen.onclick = (e) => {
+  if (e.target === fullscreen) {
+    closeFullscreen();
+  }
+};
+
+// Close fullscreen with Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && fullscreen.style.display === 'flex') {
+    closeFullscreen();
+  }
+});
+
+// Function to set date range shortcuts
+function setDateRange(range) {
+  const fromInput = document.getElementById('from');
+  const toInput = document.getElementById('to');
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  
+  switch(range) {
+    case 'today':
+      fromInput.value = todayStr;
+      toInput.value = todayStr;
+      break;
+    case 'yesterday':
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      fromInput.value = yesterdayStr;
+      toInput.value = yesterdayStr;
+      break;
+    case 'week':
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay());
+      fromInput.value = weekStart.toISOString().split('T')[0];
+      toInput.value = todayStr;
+      break;
+    case 'month':
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      fromInput.value = monthStart.toISOString().split('T')[0];
+      toInput.value = todayStr;
+      break;
+    case 'all':
+      fromInput.value = '';
+      toInput.value = '';
+      break;
+  }
+  
+  // Update camera dropdown after setting dates
+  populateCameraDropdown();
+}
+
+// Function to populate camera dropdown based on current date filters
+async function populateCameraDropdown() {
+  try {
+    const from = document.getElementById('from').value;
+    const to = document.getElementById('to').value;
+    
+    // Build query parameters for /cameras endpoint
+    let queryParams = '';
+    if (from && to) {
+      const fromTs = Math.floor(new Date(from + 'T00:00:00Z').getTime() / 1000);
+      const toTs = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
+      queryParams = `from=${fromTs}&to=${toTs}`;
+    } else if (from) {
+      const fromTs = Math.floor(new Date(from + 'T00:00:00Z').getTime() / 1000);
+      queryParams = `from=${fromTs}`;
+    } else if (to) {
+      const toTs = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
+      queryParams = `to=${toTs}`;
+    }
+    
+    const response = await fetch(`/cameras?${queryParams}`);
+    if (!response.ok) throw new Error('Failed to fetch camera stats');
+    const data = await response.json();
+    
+    // Clear existing options except "All Cameras"
+    cameraSelect.innerHTML = '<option value="">All Cameras</option>';
+    
+    if (data.cameras && Array.isArray(data.cameras)) {
+      data.cameras.forEach(camera => {
+        const option = document.createElement('option');
+        option.value = camera.camera;
+        option.textContent = `${camera.camera} (${camera.count})`;
+        cameraSelect.appendChild(option);
+      });
+    }
+    
+    // Sync mobile controls
+    syncMobileControls();
+  } catch (error) {
+    console.error('Failed to load camera list:', error);
+    // Add a fallback option if API fails
+    if (cameraSelect.children.length <= 1) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No cameras found';
+      option.disabled = true;
+      cameraSelect.appendChild(option);
+    }
+  }
+}
+
+// Mobile menu functionality
+const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+const mobileNav = document.getElementById('mobileNav');
+const mobileCamera = document.getElementById('mobileCamera');
+const mobileFrom = document.getElementById('mobileFrom');
+const mobileTo = document.getElementById('mobileTo');
+const mobileDetectionType = document.getElementById('mobileDetectionType');
+const mobileToggleView = document.getElementById('mobileToggleView');
+const mobileApply = document.getElementById('mobileApply');
+const mobileReset = document.getElementById('mobileReset');
+const mobileRefresh = document.getElementById('mobileRefresh');
+
+// Mobile filters toggle
+const mobileFiltersToggle = document.getElementById('mobileFiltersToggle');
+const mobileFiltersSection = document.getElementById('mobileFiltersSection');
+
+// Desktop controls
+const cameraSelect = document.getElementById('camera');
+
+// Toggle mobile menu
+mobileMenuToggle.addEventListener('click', function() {
+  mobileMenuToggle.classList.toggle('active');
+  mobileNav.classList.toggle('show');
+});
+
+// Close mobile menu when clicking outside
+document.addEventListener('click', function(event) {
+  if (!mobileMenuToggle.contains(event.target) && !mobileNav.contains(event.target)) {
+    mobileMenuToggle.classList.remove('active');
+    mobileNav.classList.remove('show');
+  }
+});
+
+// Toggle mobile filters
+mobileFiltersToggle.addEventListener('click', function() {
+  mobileFiltersToggle.classList.toggle('active');
+  mobileFiltersSection.classList.toggle('open');
+});
+
+// Ensure filters start closed
+document.addEventListener('DOMContentLoaded', function() {
+  mobileFiltersSection.classList.remove('open');
+  mobileFiltersToggle.classList.remove('active');
+});
+
+// Mobile scroll-to-top functionality - initialize after DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+  const scrollToTopBtn = document.getElementById('scrollToTop');
+  const floatingDate = document.getElementById('floatingDate');
+  const floatingDateText = document.getElementById('floatingDateText');
+  const scrollProgress = document.getElementById('scrollProgress');
+  // Initialize scroll-to-top button as hidden
+  if (scrollToTopBtn) {
+    scrollToTopBtn.classList.remove('visible');
+  }
+
+  // Only add event listeners if elements exist
+  if (scrollToTopBtn) {
+    // Show/hide scroll-to-top button based on scroll position
+    window.addEventListener('scroll', function() {
+      if (window.scrollY > 300) {
+        scrollToTopBtn.classList.add('visible');
+      } else {
+        scrollToTopBtn.classList.remove('visible');
+      }
+    });
+
+    // Scroll to top when button is clicked
+    scrollToTopBtn.addEventListener('click', function() {
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
+    });
+  }
+
+  // Scroll progress indicator
+  if (scrollProgress) {
+    window.addEventListener('scroll', function() {
+      const scrollTop = window.scrollY;
+      const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+      const scrollPercent = (scrollTop / docHeight) * 100;
+      scrollProgress.style.width = scrollPercent + '%';
+    });
+  }
+
+
+  // Show floating date indicator while scrolling
+  if (floatingDate && floatingDateText) {
+    let scrollTimeout;
+    window.addEventListener('scroll', function() {
+      // Show floating date
+      const currentDate = new Date().toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+      floatingDateText.textContent = currentDate;
+      floatingDate.classList.add('visible');
+      
+      // Hide floating date after scrolling stops
+      clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(function() {
+        floatingDate.classList.remove('visible');
+      }, 1000);
+    });
+  }
+});
+
+// Sync mobile controls with desktop controls
+function syncMobileControls() {
+  mobileCamera.innerHTML = cameraSelect.innerHTML;
+  mobileCamera.value = cameraSelect.value;
+  mobileFrom.value = document.getElementById('from').value;
+  mobileTo.value = document.getElementById('to').value;
+  mobileDetectionType.value = document.getElementById('detectionType').value;
+}
+
+// Mobile control event listeners
+mobileCamera.addEventListener('change', function() {
+  cameraSelect.value = mobileCamera.value;
+  loadPage(false);
+});
+
+mobileFrom.addEventListener('change', function() {
+  document.getElementById('from').value = mobileFrom.value;
+  populateCameraDropdown();
+});
+
+mobileTo.addEventListener('change', function() {
+  document.getElementById('to').value = mobileTo.value;
+  populateCameraDropdown();
+});
+
+mobileDetectionType.addEventListener('change', function() {
+  document.getElementById('detectionType').value = mobileDetectionType.value;
+});
+
+mobileToggleView.addEventListener('click', function() {
+  document.getElementById('toggleView').click();
+});
+
+mobileApply.addEventListener('click', function() {
+  document.getElementById('apply').click();
+});
+
+mobileReset.addEventListener('click', function() {
+  document.getElementById('reset').click();
+});
+
+mobileRefresh.addEventListener('click', function() {
+  document.getElementById('refresh').click();
+});
+
+// Grid size control functionality
+const gridSizeSelect = document.getElementById('gridSize');
+const mobileGridSizeSelect = document.getElementById('mobileGridSize');
+const gridContainer = document.querySelector('.grid');
+
+// Determine maximum available grid size based on screen width
+function getMaxGridSize() {
+  const screenWidth = window.innerWidth;
+  if (screenWidth <= 480) {
+    return 2; // Mobile: max 2 columns
+  } else if (screenWidth <= 768) {
+    return 4; // Tablet: max 4 columns
+  } else {
+    return 8; // Desktop: max 8 columns
+  }
+}
+
+// Filter grid size options based on current screen size
+function filterGridSizeOptions() {
+  const maxSize = getMaxGridSize();
+  
+  // Filter desktop options
+  const desktopOptions = gridSizeSelect.querySelectorAll('option');
+  desktopOptions.forEach(option => {
+    const value = parseInt(option.value);
+    if (value > maxSize) {
+      option.style.display = 'none';
+    } else {
+      option.style.display = 'block';
+    }
+  });
+  
+  // Filter mobile options
+  const mobileOptions = mobileGridSizeSelect.querySelectorAll('option');
+  mobileOptions.forEach(option => {
+    const value = parseInt(option.value);
+    if (value > maxSize) {
+      option.style.display = 'none';
+    } else {
+      option.style.display = 'block';
+    }
+  });
+  
+  // Ensure current selection is valid
+  const currentValue = parseInt(gridSizeSelect.value);
+  if (currentValue > maxSize) {
+    const newValue = maxSize.toString();
+    gridSizeSelect.value = newValue;
+    mobileGridSizeSelect.value = newValue;
+    applyGridSize(newValue);
+  }
+}
+
+// Load saved grid size preference
+function loadGridSizePreference() {
+  const savedGridSize = localStorage.getItem('detectionGridSize') || '2';
+  const maxSize = getMaxGridSize();
+  const validSize = Math.min(parseInt(savedGridSize), maxSize).toString();
+  
+  gridSizeSelect.value = validSize;
+  mobileGridSizeSelect.value = validSize;
+  applyGridSize(validSize);
+}
+
+// Apply grid size to the grid container
+function applyGridSize(size) {
+  // Remove all existing grid classes
+  gridContainer.classList.remove('grid-1', 'grid-2', 'grid-3', 'grid-4', 'grid-5', 'grid-6', 'grid-7', 'grid-8');
+  
+  // Add the new grid class
+  gridContainer.classList.add(`grid-${size}`);
+  
+  // Save preference
+  localStorage.setItem('detectionGridSize', size);
+}
+
+// Desktop grid size change
+gridSizeSelect.addEventListener('change', function() {
+  const selectedSize = this.value;
+  mobileGridSizeSelect.value = selectedSize; // Sync with mobile
+  applyGridSize(selectedSize);
+});
+
+// Mobile grid size change
+mobileGridSizeSelect.addEventListener('change', function() {
+  const selectedSize = this.value;
+  gridSizeSelect.value = selectedSize; // Sync with desktop
+  applyGridSize(selectedSize);
+});
+
+// Initialize grid size on page load
+document.addEventListener('DOMContentLoaded', function() {
+  filterGridSizeOptions();
+  loadGridSizePreference();
+});
+
+// Update grid options when window is resized
+window.addEventListener('resize', function() {
+  filterGridSizeOptions();
+});
+
+// Mobile date range functions
+function setMobileDateRange(range) {
+  setDateRange(range);
+  syncMobileControls();
+}
+
+// Add event listeners for date changes
+document.getElementById('from').addEventListener('change', populateCameraDropdown);
+document.getElementById('to').addEventListener('change', populateCameraDropdown);
+
+// initial load
+populateCameraDropdown();
+loadPage(false);
+
+// Ensure mobile controls are synced after initial load
+setTimeout(() => {
+  syncMobileControls();
+}, 100);
+</script>
+
+<!-- Mobile scroll progress indicator -->
+<div id="scrollProgress" class="scroll-progress"></div>
+
+
+<!-- Mobile scroll-to-top button -->
+<button id="scrollToTop" class="scroll-to-top" title="Back to top">
+  <span>↑</span>
+</button>
+
+<!-- Mobile floating date indicator -->
+<div id="floatingDate" class="floating-date">
+  <span id="floatingDateText"></span>
+</div>
+</body>
+</html>
