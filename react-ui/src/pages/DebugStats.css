@@ -1,0 +1,65 @@
+.debug-stats-page main {
+  padding: 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.controls {
+  margin-bottom: 20px;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  opacity: 0.6;
+}
+
+.endpoint-section {
+  background: #1a1d29;
+  border: 1px solid #2a2f3a;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.endpoint-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.method {
+  display: inline-block;
+  background: #375dfb;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.url {
+  font-family: monospace;
+  color: #66ff66;
+  font-size: 14px;
+}
+
+.description {
+  color: #aaa;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.json-display {
+  background: #111318;
+  border: 1px solid #2a2f3a;
+  border-radius: 6px;
+  padding: 16px;
+  font-family: monospace;
+  font-size: 12px;
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+  color: #e8e8e8;
+}

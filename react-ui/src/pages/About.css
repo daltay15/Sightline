@@ -1,0 +1,74 @@
+.about-page main {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.info-card {
+  background: #1a1d26;
+  border: 1px solid #2a2f3a;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.info-card h2 {
+  color: #e8e8e8;
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.info-card h3 {
+  color: #e8e8e8;
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 20px;
+  margin-bottom: 12px;
+}
+
+.info-card p {
+  line-height: 1.6;
+  margin-bottom: 12px;
+  opacity: 0.9;
+}
+
+.info-card ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.info-card ul li {
+  padding: 8px 0;
+  line-height: 1.6;
+  opacity: 0.9;
+}
+
+.info-card ul li::before {
+  content: '▹ ';
+  color: #375dfb;
+  font-weight: bold;
+  margin-right: 8px;
+}
+
+.info-card code {
+  background: #111318;
+  border: 1px solid #2a2f3a;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 13px;
+  color: #66ff66;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.action-buttons button {
+  padding: 12px 24px;
+  font-size: 14px;
+}

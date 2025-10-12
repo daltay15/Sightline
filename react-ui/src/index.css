@@ -1,0 +1,63 @@
+:root {
+  font-family: system-ui, Arial, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0b0c10;
+  color: #e8e8e8;
+  line-height: 1.6;
+}
+
+input, button, select, textarea {
+  background: #171a21;
+  color: #e8e8e8;
+  border: 1px solid #2a2f3a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+button {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+button:hover {
+  background: #2a2f3a;
+}
+
+button.primary {
+  background: #375dfb;
+  border-color: #375dfb;
+  color: #fff;
+}
+
+button.primary:hover {
+  background: #4d6ffc;
+}
+
+select {
+  cursor: pointer;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: #375dfb;
+}
+
+a {
+  color: #375dfb;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}

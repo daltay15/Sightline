@@ -32,3 +32,6 @@ api/scui-api
 *.pt
 *.jpg
 Security-Camera-UI/
+node_modules/
+react-ui/dist/
+react-ui/build/
