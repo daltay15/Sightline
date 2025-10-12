@@ -966,7 +966,12 @@ function card(e){
   videoBtn.textContent = 'Video';
   
   // Check for video availability and processing status
-  const hasVideo = e.videoPath || e.correlatedVideoPath;
+  // Include fallback to check if we can construct video path from image path
+  let hasVideo = e.videoPath || e.correlatedVideoPath;
+  if (!hasVideo && e.path && e.path.toLowerCase().endsWith('.jpg')) {
+    // Check if a video might exist by constructing the path
+    hasVideo = true; // Assume video exists, will be verified when clicked
+  }
   const now = Date.now() / 1000;
   const eventTime = e.startTs;
   const isRecent = (now - eventTime) < 300; // 5 minutes

@@ -1403,7 +1403,14 @@ async function card(e){
   const isRecent = (now - eventTime) < 300; // 5 minutes
   const isVeryRecent = (now - eventTime) < 60; // 1 minute - don't check for video yet
   
-  if (isRecent && !e.videoPath && !e.correlatedVideoPath) {
+  // Check for video availability including fallback path construction
+  let hasVideoMetadata = e.videoPath || e.correlatedVideoPath;
+  if (!hasVideoMetadata && e.path && e.path.toLowerCase().endsWith('.jpg')) {
+    // Can construct video path from image path
+    hasVideoMetadata = true;
+  }
+  
+  if (isRecent && !hasVideoMetadata) {
     if (isVeryRecent) {
       videoBtn.textContent = 'Video Processing...';
       videoBtn.disabled = true;
