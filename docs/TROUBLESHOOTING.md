@@ -146,6 +146,43 @@ sqlite3 data/events.db "DELETE FROM events WHERE path NOT LIKE '%' AND NOT EXIST
    tail -f gpu-service.log
    ```
 
+4. **Use new debug endpoints:**
+   ```bash
+   # Check detection processing status
+   curl http://localhost:8080/debug-detections
+   
+   # Manually trigger detection processing
+   curl -X POST http://localhost:8080/test/process-detections
+   ```
+
+#### Issue: New detections not appearing in UI
+**Symptoms:**
+- Detection processing working but UI not updating
+- New detections not showing in real-time
+
+**Solution:**
+1. **Check detection processing status:**
+   ```bash
+   curl http://localhost:8080/debug-detections
+   # Look for "recentDetectionUpdates" and "pendingDetectionSamples"
+   ```
+
+2. **Verify UI auto-refresh:**
+   - Check browser console for JavaScript errors
+   - Ensure `/scan-status` endpoint is responding
+   - Look for "eventsWithDetectionData" count increasing
+
+3. **Manual detection processing:**
+   ```bash
+   # Trigger detection processing manually
+   curl -X POST http://localhost:8080/test/process-detections
+   ```
+
+4. **Check detection pipeline:**
+   - Verify JSON files are being processed
+   - Check that `detection_data` is being populated
+   - Monitor DetectionProcessor logs
+
 #### Issue: Low detection accuracy
 **Symptoms:**
 - Many false positives/negatives

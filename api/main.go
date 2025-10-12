@@ -129,6 +129,25 @@ func main() {
 		}
 	}
 
+	// Add media correlation metadata columns if they don't exist
+	// Check if video_path column exists
+	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='video_path'").Scan(&columnExists)
+	if err != nil || columnExists == 0 {
+		log.Printf("Adding video_path column to events table")
+		if _, err := db.Exec("ALTER TABLE events ADD COLUMN video_path TEXT"); err != nil {
+			log.Printf("Warning: Failed to add video_path column: %v", err)
+		}
+	}
+
+	// Check if detection_path column exists
+	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='detection_path'").Scan(&columnExists)
+	if err != nil || columnExists == 0 {
+		log.Printf("Adding detection_path column to events table")
+		if _, err := db.Exec("ALTER TABLE events ADD COLUMN detection_path TEXT"); err != nil {
+			log.Printf("Warning: Failed to add detection_path column: %v", err)
+		}
+	}
+
 	// Create additional indexes for detection columns
 	indexSQL := `
 		CREATE INDEX IF NOT EXISTS idx_events_reviewed ON events(reviewed);
@@ -206,12 +225,105 @@ func main() {
 		})
 	})
 
+	// Debug endpoint for detection processing
+	r.GET("/debug-detections", func(c *gin.Context) {
+		var totalEvents, detectionEvents, eventsWithDetectionData, detectionsTable int64
+		_ = db.QueryRow("SELECT COUNT(*) FROM events").Scan(&totalEvents)
+		_ = db.QueryRow("SELECT COUNT(*) FROM events WHERE camera = 'DETECTION'").Scan(&detectionEvents)
+		_ = db.QueryRow("SELECT COUNT(*) FROM events WHERE detection_data IS NOT NULL").Scan(&eventsWithDetectionData)
+		_ = db.QueryRow("SELECT COUNT(*) FROM detections").Scan(&detectionsTable)
+
+		// Get recent detection events
+		rows, err := db.Query("SELECT id, camera, path, start_ts, detection_data IS NOT NULL as has_detection_data FROM events WHERE camera = 'DETECTION' ORDER BY start_ts DESC LIMIT 10")
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		var detectionSamples []map[string]any
+		for rows.Next() {
+			var id, camera, path string
+			var startTs int64
+			var hasDetectionData bool
+			_ = rows.Scan(&id, &camera, &path, &startTs, &hasDetectionData)
+			detectionSamples = append(detectionSamples, map[string]any{
+				"id": id, "camera": camera, "path": path, "startTs": startTs, "hasDetectionData": hasDetectionData,
+			})
+		}
+
+		// Get recent events with detection data
+		rows2, err := db.Query("SELECT id, camera, path, start_ts FROM events WHERE detection_data IS NOT NULL ORDER BY start_ts DESC LIMIT 10")
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows2.Close()
+
+		var eventsWithDetectionSamples []map[string]any
+		for rows2.Next() {
+			var id, camera, path string
+			var startTs int64
+			_ = rows2.Scan(&id, &camera, &path, &startTs)
+			eventsWithDetectionSamples = append(eventsWithDetectionSamples, map[string]any{
+				"id": id, "camera": camera, "path": path, "startTs": startTs,
+			})
+		}
+
+		// Get events that should have detection data but don't (recent events without detection data)
+		rows3, err := db.Query(`
+			SELECT e.id, e.camera, e.path, e.start_ts, e.created_at,
+			       CASE WHEN d.id IS NOT NULL THEN 1 ELSE 0 END as has_detection_event
+			FROM events e 
+			LEFT JOIN events d ON d.camera = 'DETECTION' AND d.tags LIKE 'detection_for_event_' || e.id
+			WHERE e.camera != 'DETECTION' 
+			AND e.path LIKE '%.jpg'
+			AND e.detection_data IS NULL
+			AND e.start_ts > ? 
+			ORDER BY e.start_ts DESC 
+			LIMIT 10
+		`, time.Now().Unix()-3600) // Last hour
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows3.Close()
+
+		var pendingDetectionSamples []map[string]any
+		for rows3.Next() {
+			var id, camera, path string
+			var startTs, createdAt int64
+			var hasDetectionEvent bool
+			_ = rows3.Scan(&id, &camera, &path, &startTs, &createdAt, &hasDetectionEvent)
+			pendingDetectionSamples = append(pendingDetectionSamples, map[string]any{
+				"id": id, "camera": camera, "path": path, "startTs": startTs, "createdAt": createdAt, "hasDetectionEvent": hasDetectionEvent,
+			})
+		}
+
+		// Get detection processing stats
+		var recentDetectionUpdates int64
+		_ = db.QueryRow("SELECT COUNT(*) FROM events WHERE detection_updated > ?", time.Now().Unix()-300).Scan(&recentDetectionUpdates) // Last 5 minutes
+
+		c.JSON(200, gin.H{
+			"totalEvents":                totalEvents,
+			"detectionEvents":            detectionEvents,
+			"eventsWithDetectionData":    eventsWithDetectionData,
+			"detectionsTable":            detectionsTable,
+			"recentDetectionUpdates":     recentDetectionUpdates,
+			"detectionSamples":           detectionSamples,
+			"eventsWithDetectionSamples": eventsWithDetectionSamples,
+			"pendingDetectionSamples":    pendingDetectionSamples,
+		})
+	})
+
 	// Live scanning status endpoint
 	r.GET("/scan-status", func(c *gin.Context) {
-		var totalEvents, videoEvents, thumbnailsGenerated int64
+		var totalEvents, videoEvents, thumbnailsGenerated, detectionEvents, eventsWithDetectionData int64
 		_ = db.QueryRow("SELECT COUNT(*) FROM events").Scan(&totalEvents)
 		_ = db.QueryRow("SELECT COUNT(*) FROM events WHERE path LIKE '%.mp4'").Scan(&videoEvents)
 		_ = db.QueryRow("SELECT COUNT(*) FROM events WHERE jpg_path IS NOT NULL").Scan(&thumbnailsGenerated)
+		_ = db.QueryRow("SELECT COUNT(*) FROM events WHERE camera = 'DETECTION'").Scan(&detectionEvents)
+		_ = db.QueryRow("SELECT COUNT(*) FROM events WHERE detection_data IS NOT NULL").Scan(&eventsWithDetectionData)
 
 		// Get recent events (last 10)
 		rows, err := db.Query("SELECT id, camera, path, start_ts FROM events ORDER BY start_ts DESC LIMIT 10")
@@ -232,11 +344,13 @@ func main() {
 		}
 
 		c.JSON(200, gin.H{
-			"totalEvents":         totalEvents,
-			"videoEvents":         videoEvents,
-			"thumbnailsGenerated": thumbnailsGenerated,
-			"recentEvents":        recentEvents,
-			"scanning":            totalEvents == 0, // Assume scanning if no events yet
+			"totalEvents":             totalEvents,
+			"videoEvents":             videoEvents,
+			"thumbnailsGenerated":     thumbnailsGenerated,
+			"detectionEvents":         detectionEvents,
+			"eventsWithDetectionData": eventsWithDetectionData,
+			"recentEvents":            recentEvents,
+			"scanning":                totalEvents == 0, // Assume scanning if no events yet
 		})
 	})
 

@@ -49,6 +49,11 @@
     .date-shortcuts button{background:#2a2f3a;border:1px solid #444;color:#e8e8e8;padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;transition:all 0.2s}
     .date-shortcuts button:hover{background:#375dfb;border-color:#375dfb;color:#fff}
     
+    /* Button styling for Original/Video toggles */
+    .comparison-view{display:flex;gap:4px;align-items:center;margin-top:8px}
+    .comparison-view button{background:#2a2f3a;border:1px solid #444;color:#e8e8e8;padding:4px 8px;border-radius:4px;font-size:10px;cursor:pointer;flex:1;text-align:center}
+    .comparison-view button.active{background:#375dfb;border-color:#375dfb;color:#fff}
+    
     /* Mobile Navigation Styles */
     .mobile-menu-toggle {
       display: none;
@@ -548,22 +553,7 @@
         <button type="button" onclick="setDateRange('all')">All Time</button>
       </div>
       <input id="minmb" type="number" min="0" step="1" placeholder="Min MB">
-      <select id="detection">
-        <option value="">All Events</option>
-        <option value="person">👤 People Only</option>
-        <option value="car">🚗 Cars Only</option>
-        <option value="truck">🚛 Trucks Only</option>
-        <option value="bicycle">🚲 Bicycles Only</option>
-        <option value="motorcycle">🏍️ Motorcycles Only</option>
-        <option value="bird">🐦 Birds Only</option>
-        <option value="dog">🐕 Dogs Only</option>
-        <option value="high-confidence">High Confidence</option>
-      </select>
-      <select id="fileType">
-        <option value="jpg">JPG Images Only</option>
-        <option value="all">All Files</option>
-      </select>
-      <button id="toggleDetection" class="primary">🔍 Show Detection Images</button>
+      <button id="toggleView" class="primary">📷 Original</button>
       <button id="apply" class="primary">Apply</button>
       <button id="reset">Reset</button>
       <button id="refresh">Refresh</button>
@@ -619,26 +609,11 @@
               </div>
             </div>
             <input id="mobileMinmb" type="number" min="0" step="1" placeholder="Min MB">
-            <select id="mobileDetection">
-              <option value="">All Events</option>
-              <option value="person">👤 People Only</option>
-              <option value="car">🚗 Cars Only</option>
-              <option value="truck">🚛 Trucks Only</option>
-              <option value="bicycle">🚲 Bicycles Only</option>
-              <option value="motorcycle">🏍️ Motorcycles Only</option>
-              <option value="bird">🐦 Birds Only</option>
-              <option value="dog">🐕 Dogs Only</option>
-              <option value="high-confidence">High Confidence</option>
-            </select>
-            <select id="mobileFileType">
-              <option value="jpg">JPG Images Only</option>
-              <option value="all">All Files</option>
-            </select>
           </div>
           
           <div class="actions-section">
             <h4>🎛️ Actions</h4>
-            <button id="mobileToggleDetection" class="primary">🔍 Show Detection Images</button>
+            <button id="mobileToggleView" class="primary">📷 Original</button>
             <div class="action-buttons">
               <button id="mobileApply" class="primary">Apply</button>
               <button id="mobileReset">Reset</button>
@@ -684,7 +659,7 @@ let autoRefreshInterval;
 let lastEventCount = 0;
 let debounceTimer;
 let currentlyPlayingVideo = null;
-let showDetectionImages = false;
+let showVideo = false;
 
 function qs(obj){const u=new URLSearchParams();for(const[k,v]of Object.entries(obj)) if(v!==''&&v!=null) u.append(k,String(v)); return u.toString();}
 function fmtMB(b){return (b/1e6).toFixed(1)+' MB';}
@@ -705,8 +680,8 @@ function fmtTs(s){
 function isMP4(p){return p && p.toLowerCase().endsWith('.mp4');}
 
 async function fetchEvents(params={}) {
-  // Use enhanced endpoint for detection data
-  const res = await fetch('/events/enhanced?' + qs(params));
+  // Use correlated events endpoint to get base images with video correlation
+  const res = await fetch('/events/correlated?' + qs(params));
   if(!res.ok) throw new Error('HTTP '+res.status);
   return res.json();
 }
@@ -731,12 +706,102 @@ function hideStatus() {
   status.style.display = 'none';
 }
 
+function stopAllVideos() {
+  // Stop the currently playing video
+  if (currentlyPlayingVideo) {
+    currentlyPlayingVideo.pause();
+    currentlyPlayingVideo.currentTime = 0;
+    currentlyPlayingVideo.style.display = 'none';
+    // Remove playing class from the card and show thumbnail
+    const card = currentlyPlayingVideo.closest('.card');
+    if (card) {
+      card.classList.remove('playing');
+      const img = card.querySelector('img');
+      if (img) img.style.display = 'block';
+    }
+    currentlyPlayingVideo = null;
+  }
+}
+
 function debouncedRefresh() {
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     loadPage(false);
     hideStatus();
   }, 2000);
+}
+
+function updateVideoProcessingStatus() {
+  const videoButtons = document.querySelectorAll('.comparison-view button');
+  const checkedPaths = new Set(); // Track already checked paths to avoid duplicates
+  const now = Date.now() / 1000;
+  let hasProcessingButtons = false;
+  
+  videoButtons.forEach(btn => {
+    if (btn.textContent === 'Video Processing...') {
+      hasProcessingButtons = true;
+      // Find the event data for this button
+      const card = btn.closest('.card');
+      if (card) {
+        const eventId = card.dataset.id;
+        const expectedVideoPath = card.dataset.expectedVideoPath;
+        
+        if (eventId && expectedVideoPath) {
+          // Create a unique key for this check to avoid duplicate requests
+          const checkKey = `${eventId}-${expectedVideoPath}`;
+          
+          if (!checkedPaths.has(checkKey)) {
+            checkedPaths.add(checkKey);
+            
+            // Skip checking if the event is very recent (less than 1 minute old)
+            // This prevents unnecessary 404 requests for videos that are still being processed
+            const eventTime = parseInt(card.dataset.eventTime || '0');
+            if (eventTime > 0 && (now - eventTime) < 60) {
+              console.log(`Skipping video check for very recent event ${eventId}`);
+              return;
+            }
+            
+            // Check if video is now available by testing the stream endpoint
+            fetch(`/stream/${eventId}?path=${encodeURIComponent(expectedVideoPath)}`, { method: 'HEAD' })
+              .then(response => {
+                if (response.ok) {
+                  btn.textContent = 'Video';
+                  btn.disabled = false;
+                  btn.style.opacity = '1';
+                  console.log(`Video now available for event ${eventId}`);
+                } else if (response.status === 206) {
+                  // Partial content - video might still be processing
+                  console.log(`Video partially available for event ${eventId} (still processing)`);
+                } else {
+                  console.log(`Video still processing for event ${eventId} (${response.status})`);
+                }
+              })
+              .catch(err => {
+                if (err.message.includes('CONTENT_LENGTH_MISMATCH')) {
+                  console.log(`Video file incomplete for event ${eventId} (still processing)`);
+                } else {
+                  console.log('Error checking video status:', err);
+                }
+              });
+          }
+        }
+      }
+    }
+  });
+  
+  // If we have processing buttons, trigger database update to find new videos
+  if (hasProcessingButtons) {
+    fetch('/update-video-metadata', { method: 'POST' })
+      .then(response => response.json())
+      .then(data => {
+        if (data.updated > 0) {
+          console.log(`Updated ${data.updated} video metadata entries`);
+          // Refresh the page to get updated data
+          debouncedRefresh();
+        }
+      })
+      .catch(err => console.log('Error updating video metadata:', err));
+  }
 }
 
 function startAutoRefresh() {
@@ -763,6 +828,9 @@ function startAutoRefresh() {
         }
         lastEventCount = currentCount;
       }
+      
+      // Check for video processing completion
+      updateVideoProcessingStatus();
     } catch (e) {
       showStatus('Connection error', 'error');
     }
@@ -837,148 +905,216 @@ function stopAllVideos() {
 }
 
 function card(e){
-  const div = document.createElement('div'); div.className='card';
+  const div = document.createElement('div'); 
+  div.className='card';
+  div.dataset.id = e.id; // Add event ID for video processing checks
+  div.dataset.eventTime = e.startTs; // Add event timestamp for processing checks
+  
+  // Store expected video path for processing checks
+  let expectedVideoPath = e.videoPath || e.correlatedVideoPath || e.path;
+  if (expectedVideoPath && expectedVideoPath.toLowerCase().endsWith('.jpg')) {
+    expectedVideoPath = expectedVideoPath.replace(/\.jpg$/i, '.mp4');
+  }
+  div.dataset.expectedVideoPath = expectedVideoPath;
+  
   const img = document.createElement('img'); 
   img.className='thumb'; 
   img.loading='lazy'; 
   img.decoding='async';
   
-  // Determine which image to show based on toggle state and detection data availability
-  if (showDetectionImages && e.detectionData) {
-    // Try to parse detection data to see if we have an annotated image
-    try {
-      const detectionData = JSON.parse(e.detectionData);
-      if (detectionData.annotated_image) {
-        img.src = '/detection/' + e.id;
-        img.title = 'Detection Image (click to view original)';
-      } else {
-        img.src = '/thumb/' + e.id;
-        img.title = 'Original Image';
-      }
-    } catch (err) {
-      img.src = '/thumb/' + e.id;
-      img.title = 'Original Image';
-    }
-  } else {
-    img.src = '/thumb/' + e.id;
-    img.title = 'Original Image';
-  }
+  // Create video element (initially hidden)
+  const video = document.createElement('video');
+  video.className = 'thumb';
+  video.style.display = 'none';
+  video.controls = true;
+  video.preload = 'none';
+  video.muted = true;
+  video.disablePictureInPicture = true;
+  
+  // Set image source - always show original image initially
+  img.src = '/thumb/' + e.id;
+  img.title = 'Original Image (click to view fullscreen)';
   
   img.onerror = () => { 
     img.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="260" height="146" viewBox="0 0 260 146"><rect width="260" height="146" fill="%230f1116"/><text x="50%" y="50%" text-anchor="middle" dy=".3em" fill="%23ff6666">File Deleted</text></svg>'; 
     img.style.cursor = 'not-allowed';
     img.title = 'Original file has been deleted';
   };
-  div.appendChild(img);
   
-  // Add detection badges if available
-  if (e.detections && e.detections.length > 0) {
-    const badges = document.createElement('div');
-    badges.className = 'detection-badges';
-    badges.style.cssText = 'position:absolute;top:8px;right:8px;display:flex;gap:4px;flex-wrap:wrap;max-width:120px;';
-    
-    // Group detections by type and show count
-    const detectionCounts = {};
-    e.detections.forEach(det => {
-      detectionCounts[det.type] = (detectionCounts[det.type] || 0) + 1;
-    });
-    
-    Object.entries(detectionCounts).forEach(([type, count]) => {
-      const badge = document.createElement('div');
-      badge.className = `detection-badge ${type}`;
-      badge.style.cssText = 'padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(0,0,0,0.7);color:white;';
-      
-      const icon = type === 'person' ? '👤' : 
-                   type === 'car' ? '🚗' : 
-                   type === 'truck' ? '🚛' : 
-                   type === 'bicycle' ? '🚲' : 
-                   type === 'motorcycle' ? '🏍️' : 
-                   type === 'bird' ? '🐦' : 
-                   type === 'dog' ? '🐕' : '🔍';
-      
-      badge.textContent = `${icon} ${count}`;
-      badge.title = `${count} ${type}${count > 1 ? 's' : ''} detected`;
-      badges.appendChild(badge);
-    });
-    
-    div.appendChild(badges);
+  div.appendChild(img);
+  div.appendChild(video);
+  
+  // Create button container (like detections page)
+  const comparisonView = document.createElement('div');
+  comparisonView.className = 'comparison-view';
+  
+  const originalBtn = document.createElement('button');
+  originalBtn.textContent = 'Original';
+  originalBtn.onclick = (event) => {
+    event.stopPropagation();
+    // Show image, hide video
+    img.style.display = 'block';
+    video.style.display = 'none';
+    video.pause();
+    img.src = '/thumb/' + e.id;
+    img.title = 'Original Image (click to view fullscreen)';
+    originalBtn.classList.add('active');
+    videoBtn.classList.remove('active');
+  };
+  
+  const videoBtn = document.createElement('button');
+  videoBtn.textContent = 'Video';
+  
+  // Check for video availability and processing status
+  const hasVideo = e.videoPath || e.correlatedVideoPath;
+  const now = Date.now() / 1000;
+  const eventTime = e.startTs;
+  const isRecent = (now - eventTime) < 300; // 5 minutes
+  const isVeryRecent = (now - eventTime) < 60; // 1 minute
+  
+  if (!hasVideo) {
+    if (isRecent) {
+      videoBtn.textContent = 'Video Processing...';
+      videoBtn.disabled = true;
+      videoBtn.style.opacity = '0.6';
+    } else {
+      videoBtn.disabled = true;
+      videoBtn.textContent = 'No Video';
+    }
   }
   
-  const meta = document.createElement('div'); meta.className='meta';
-  const left = document.createElement('div'); left.innerHTML = `<div class="camera">${e.camera||'—'}</div><div class="ts">${fmtTs(e.startTs)}</div>`;
-  const right = document.createElement('div'); right.textContent = fmtMB(e.sizeBytes);
-  meta.append(left,right); div.appendChild(meta);
+  videoBtn.onclick = (event) => {
+    event.stopPropagation();
+    if (!hasVideo) {
+      alert('No video available for this event');
+      return;
+    }
+    
+    // Stop any currently playing video first
+    stopAllVideos();
+    
+    // Show video, hide image
+    img.style.display = 'none';
+    video.style.display = 'block';
+    video.poster = '/thumb/' + e.id;
+    video.title = 'Video (click to play)';
+    originalBtn.classList.remove('active');
+    videoBtn.classList.add('active');
+    
+    // Use source element with path parameter (like detections page)
+    let videoPath = e.videoPath;
+    if (!videoPath && e.path && e.path.toLowerCase().endsWith('.jpg')) {
+      videoPath = e.path.replace(/\.jpg$/i, '.mp4');
+    }
+    
+    // Set video source using source element with path parameter
+    video.innerHTML = `<source src="/stream/${e.id}?path=${encodeURIComponent(videoPath)}" type="video/mp4">`;
+    video.load(); // Load the video source
+    
+    // Set as currently playing video
+    currentlyPlayingVideo = video;
+    div.classList.add('playing');
+    
+    // Auto-play the video when ready (like detections page)
+    video.oncanplay = () => {
+      video.play().then(() => {
+        // Video started playing successfully
+      }).catch((err) => {
+        console.error('Video autoplay error:', err);
+      });
+    };
+    
+    // Add error handler for video loading
+    video.onerror = (e) => {
+      console.error('Video loading error:', e);
+    };
+    
+    // Clean up when video ends
+    video.onended = () => {
+      video.style.display = 'none';
+      div.classList.remove('playing');
+      currentlyPlayingVideo = null;
+      // Show the thumbnail image again
+      const img = div.querySelector('img');
+      if (img) img.style.display = 'block';
+    };
+  };
   
-  if (isMP4(e.path)) {
-    // Video file - show video player on click
-    const v = document.createElement('video'); 
-    v.className='player'; 
-    v.controls=true; 
-    v.preload='none'; // Don't preload anything until clicked
-    v.poster='/thumb/'+e.id; // Use thumbnail as poster
-    v.disablePictureInPicture = true; // Disable picture-in-picture
-    v.innerHTML = `<source src="/stream/${e.id}" type="video/mp4">`; 
-    div.appendChild(v);
-    img.onclick = () => { 
-      // Check if this video is currently playing
-      const isCurrentlyPlaying = currentlyPlayingVideo === v;
+  // Set initial state
+  originalBtn.classList.add('active');
+  
+  comparisonView.appendChild(originalBtn);
+  comparisonView.appendChild(videoBtn);
+  
+  // Create meta info (like detections page)
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const left = document.createElement('div');
+  left.innerHTML = `<div class="camera">${e.camera||'—'}</div><div class="ts">${fmtTs(e.startTs)}</div>`;
+  const right = document.createElement('div');
+  right.textContent = fmtMB(e.sizeBytes);
+  meta.append(left, right);
+  
+  div.appendChild(meta);
+  div.appendChild(comparisonView);
+  
+  // Handle image/video clicks
+  img.onclick = () => {
+    openFullscreen('/thumb/' + e.id);
+  };
+  
+  video.onclick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    // Check if this video is the currently tracked video
+    const isCurrentlyTracked = currentlyPlayingVideo === video;
+    
+    if (isCurrentlyTracked) {
+      // This is the currently tracked video - toggle play/pause based on actual browser state
+      if (video.paused) {
+        video.play().then(() => {
+          div.classList.add('playing');
+        }).catch((err) => {
+          console.error('Video resume failed:', err);
+          div.classList.remove('playing');
+        });
+      } else {
+        video.pause();
+        div.classList.remove('playing');
+      }
+    } else {
+      // This is a different video or no video is playing, start this one
+      // Stop any other currently playing video first
+      stopAllVideos();
       
-      if (isCurrentlyPlaying) {
-        // Video is currently playing, stop it
-        v.style.display = 'none';
-        v.pause();
-        v.currentTime = 0;
+      // Hide image, show video
+      img.style.display = 'none';
+      video.style.display = 'block';
+      currentlyPlayingVideo = video;
+      
+      // Add playing class to the card
+      div.classList.add('playing');
+      
+      // Only load video when user actually clicks to play
+      if (!video.src && !video.currentSrc) {
+        video.load(); // Load the video source
+      }
+      
+      // Clean up when video ends
+      video.onended = () => {
+        video.style.display = 'none';
         div.classList.remove('playing');
         currentlyPlayingVideo = null;
-      } else {
-        // Stop any other currently playing video first
-        stopAllVideos();
-        
-        // Show and play this video
-        v.style.display = 'block';
-        currentlyPlayingVideo = v;
-        
-        // Add playing class to the card
-        div.classList.add('playing');
-        
-        // Only load video when user actually clicks to play
-        if (!v.src && !v.currentSrc) {
-          v.load(); // Load the video source
-        }
-        
-        // Clean up when video ends
-        v.onended = () => {
-          v.style.display = 'none';
-          div.classList.remove('playing');
-          currentlyPlayingVideo = null;
-        };
-        
-        v.play().catch(()=>{}); 
-      }
-    };
-  } else {
-    // Image file - open in fullscreen on click
-    img.onclick = () => {
-      if (showDetectionImages && e.detectionData) {
-        // If showing detection images, toggle between detection and original
-        try {
-          const detectionData = JSON.parse(e.detectionData);
-          if (detectionData.annotated_image) {
-            // Currently showing detection image, switch to original
-            img.src = '/thumb/' + e.id;
-            img.title = 'Original Image (click to view detection)';
-          } else {
-            // Show original
-            openFullscreen('/thumb/' + e.id);
-          }
-        } catch (err) {
-          openFullscreen('/thumb/' + e.id);
-        }
-      } else {
-        openFullscreen('/thumb/' + e.id);
-      }
-    };
-  }
+        // Show the thumbnail image again
+        const img = div.querySelector('img');
+        if (img) img.style.display = 'block';
+      };
+      
+      video.play().catch(()=>{}); 
+    }
+  };
+  
   return div;
 }
 
@@ -1038,13 +1174,13 @@ async function loadPage(append=false){
 
     installSentinel();
   } catch (e) {
-    console.error(e);
+    console.error('Load page error:', e);
     if (!append) { 
       grid.innerHTML=''; 
       empty.style.display='block'; 
-      empty.textContent='Failed to load.'; 
+      empty.textContent='Failed to load: ' + e.message; 
       count.textContent='Error';
-      showStatus('Failed to load events', 'error');
+      showStatus('Failed to load events: ' + e.message, 'error');
     }
   } finally {
     paging.loading = false;
@@ -1059,30 +1195,12 @@ function applyFilters(){
   const from = document.getElementById('from').value;
   const to = document.getElementById('to').value;
   const minmb = document.getElementById('minmb').value;
-  const detection = document.getElementById('detection').value;
-  const fileType = document.getElementById('fileType').value;
 
   const p = {};
   if (camera) p.camera = camera;
   if (from) p.from = Math.floor(new Date(from+'T00:00:00Z').getTime()/1000);
   if (to)   p.to   = Math.floor(new Date(to+'T23:59:59Z').getTime()/1000);
   if (minmb) p.minSize = Number(minmb)*1_000_000;
-  
-  // Handle detection filters
-  if (detection) {
-    if (detection === 'high-confidence') {
-      p.minConfidence = 0.8;
-    } else {
-      p.detectionType = detection;
-    }
-  }
-  
-  // Handle file type filtering
-  if (fileType === 'jpg') {
-    // Filter for JPG files only by checking path extension
-    // This will be handled in the backend by modifying the query
-    p.fileType = 'jpg';
-  }
 
   paging.params = p;
   paging.nextOffset = 0;
@@ -1094,8 +1212,7 @@ document.getElementById('reset').onclick = ()=>{
   // Stop all videos before resetting
   stopAllVideos();
   
-  ['camera','from','to','minmb','detection'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('fileType').value = 'jpg'; // Default to JPG only
+  ['camera','from','to','minmb'].forEach(id=>document.getElementById(id).value='');
   paging.params = {};
   paging.nextOffset = 0;
   populateCameraDropdown(); // Refresh camera dropdown
@@ -1108,25 +1225,10 @@ document.getElementById('refresh').onclick = ()=>{
   loadPage(false);
 };
 
-// Toggle detection images
-document.getElementById('toggleDetection').onclick = ()=>{
-  showDetectionImages = !showDetectionImages;
-  const button = document.getElementById('toggleDetection');
-  if (showDetectionImages) {
-    button.textContent = '🖼️ Show Original Images';
-    button.style.background = '#44ff44';
-    button.style.borderColor = '#44ff44';
-  } else {
-    button.textContent = '🔍 Show Detection Images';
-    button.style.background = '#375dfb';
-    button.style.borderColor = '#375dfb';
-  }
-  
-  // Stop all videos before toggling
-  stopAllVideos();
-  
-  // Reload the current page to update images
-  loadPage(false);
+// Toggle view mode - this is now handled per-card
+document.getElementById('toggleView').onclick = ()=>{
+  // This global toggle is now disabled since each card has its own toggle
+  console.log('Global toggle clicked - functionality moved to per-card toggles');
 };
 
 // Fullscreen event listeners
@@ -1244,6 +1346,9 @@ document.getElementById('to').addEventListener('change', populateCameraDropdown)
 populateCameraDropdown();
 loadPage(false);
 
+// Update video processing status every 15 seconds
+setInterval(updateVideoProcessingStatus, 15000);
+
 // Stop auto-refresh when page is not visible to save resources
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
@@ -1290,9 +1395,7 @@ const mobileCamera = document.getElementById('mobileCamera');
 const mobileFrom = document.getElementById('mobileFrom');
 const mobileTo = document.getElementById('mobileTo');
 const mobileMinmb = document.getElementById('mobileMinmb');
-const mobileDetection = document.getElementById('mobileDetection');
-const mobileFileType = document.getElementById('mobileFileType');
-const mobileToggleDetection = document.getElementById('mobileToggleDetection');
+const mobileToggleView = document.getElementById('mobileToggleView');
 const mobileApply = document.getElementById('mobileApply');
 const mobileReset = document.getElementById('mobileReset');
 const mobileRefresh = document.getElementById('mobileRefresh');
@@ -1402,8 +1505,6 @@ function syncMobileControls() {
   mobileFrom.value = document.getElementById('from').value;
   mobileTo.value = document.getElementById('to').value;
   mobileMinmb.value = document.getElementById('minmb').value;
-  mobileDetection.value = document.getElementById('detection').value;
-  mobileFileType.value = document.getElementById('fileType').value;
 }
 
 // Mobile control event listeners
@@ -1426,16 +1527,9 @@ mobileMinmb.addEventListener('change', function() {
   document.getElementById('minmb').value = mobileMinmb.value;
 });
 
-mobileDetection.addEventListener('change', function() {
-  document.getElementById('detection').value = mobileDetection.value;
-});
 
-mobileFileType.addEventListener('change', function() {
-  document.getElementById('fileType').value = mobileFileType.value;
-});
-
-mobileToggleDetection.addEventListener('click', function() {
-  document.getElementById('toggleDetection').click();
+mobileToggleView.addEventListener('click', function() {
+  document.getElementById('toggleView').click();
 });
 
 mobileApply.addEventListener('click', function() {

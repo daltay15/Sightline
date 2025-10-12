@@ -10,9 +10,11 @@ This system provides a complete solution for managing security camera footage wi
 - **AI Object Detection**: YOLO-powered detection of people, vehicles, and objects
 - **Intelligent Organization**: Smart categorization and thumbnail generation
 - **Web Interface**: Modern, responsive dashboard for viewing and managing footage
+- **Real-time Detection Updates**: Live detection processing with automatic UI refresh
 - **Performance Monitoring**: Comprehensive system health and debug tools
 - **Distributed Processing**: Separate GPU service for AI processing
 - **Easy Configuration**: Web-based configuration system for all settings
+- **Advanced Debugging**: Enhanced detection pipeline monitoring and troubleshooting
 
 ## 🚀 Quick Start
 
@@ -147,8 +149,10 @@ The system expects camera footage organized by:
 
 - **System Overview**: Complete system status
 - **Performance Metrics**: Detailed performance data
+- **Detection Pipeline**: Comprehensive AI detection monitoring
 - **Raw API Responses**: Direct access to all endpoints
 - **Health Notifications**: Automatic alerts for issues
+- **Manual Processing**: Trigger detection processing manually
 
 ## 🚀 Performance Optimization
 

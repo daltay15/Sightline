@@ -280,13 +280,72 @@ Live scanning status and file processing information.
 **Response:**
 ```json
 {
-  "scanning_active": true,
-  "scanning_status": "Idle",
-  "files_scanned": 15000,
-  "files_processed": 14400,
-  "files_pending": 600,
-  "scan_start_time": "2024-01-01T00:00:00Z",
-  "last_scan_time": "2024-01-01T12:00:00Z"
+  "totalEvents": 179152,
+  "videoEvents": 62609,
+  "thumbnailsGenerated": 179152,
+  "detectionEvents": 53934,
+  "eventsWithDetectionData": 62138,
+  "recentEvents": [
+    {
+      "id": "180025",
+      "camera": "DETECTION",
+      "path": "/mnt/nas/pool/Cameras/GPU_Processing/completed/180023__House PTZ_01_20251012034343_det.jpg",
+      "startTs": 1760258623
+    }
+  ],
+  "scanning": false
+}
+```
+
+#### GET /debug-detections
+Comprehensive detection processing debugging information.
+
+**Response:**
+```json
+{
+  "totalEvents": 179152,
+  "detectionEvents": 53934,
+  "eventsWithDetectionData": 62138,
+  "detectionsTable": 103975,
+  "recentDetectionUpdates": 5,
+  "detectionSamples": [
+    {
+      "id": "180025",
+      "camera": "DETECTION",
+      "path": "/mnt/nas/pool/Cameras/GPU_Processing/completed/180023__House PTZ_01_20251012034343_det.jpg",
+      "startTs": 1760258623,
+      "hasDetectionData": false
+    }
+  ],
+  "eventsWithDetectionSamples": [
+    {
+      "id": "180017",
+      "camera": "PTZ_01",
+      "path": "/mnt/nas/pool/Cameras/House/2025/10/12/House PTZ_01_20251012033421.jpg",
+      "startTs": 1760258061
+    }
+  ],
+  "pendingDetectionSamples": [
+    {
+      "id": "180023",
+      "camera": "PTZ_01",
+      "path": "/mnt/nas/pool/Cameras/House/2025/10/12/House PTZ_01_20251012034343.jpg",
+      "startTs": 1760258623,
+      "createdAt": 1760258701,
+      "hasDetectionEvent": true
+    }
+  ]
+}
+```
+
+#### POST /test/process-detections
+Manually trigger detection processing for testing purposes.
+
+**Response:**
+```json
+{
+  "message": "Detection processing completed",
+  "eventsWithDetectionData": 62138
 }
 ```
 
