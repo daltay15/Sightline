@@ -926,7 +926,7 @@
         <option value="5">5 per row</option>
         <option value="6">6 per row</option>
         <option value="7">7 per row</option>
-        <option value="8" selected>8 per row</option>
+        <option value="8">8 per row</option>
       </select>
       <button id="toggleView" class="primary" style="background:#44ff44;border-color:#44ff44;">🖼️ Show All Events</button>
       <button id="apply" class="primary">Apply</button>
@@ -1000,7 +1000,7 @@
             <h4>📐 Grid Size</h4>
             <select id="mobileGridSize">
               <option value="1">1 per row (Single Column)</option>
-              <option value="2" selected>2 per row (Mobile - Recommended)</option>
+              <option value="2">2 per row (Mobile - Recommended)</option>
               <option value="3">3 per row (Tablet)</option>
               <option value="4">4 per row (Desktop)</option>
               <option value="5">5 per row (Desktop)</option>
@@ -2103,13 +2103,33 @@ function filterGridSizeOptions() {
 
 // Load saved grid size preference
 function loadGridSizePreference() {
-  const savedGridSize = localStorage.getItem('detectionGridSize') || '2';
+  const savedGridSize = localStorage.getItem('detectionGridSize');
   const maxSize = getMaxGridSize();
-  const validSize = Math.min(parseInt(savedGridSize), maxSize).toString();
+  
+  // If no preference is saved, use a sensible default based on screen size
+  let defaultSize;
+  if (window.innerWidth <= 480) {
+    defaultSize = '2'; // Mobile default
+  } else if (window.innerWidth <= 768) {
+    defaultSize = '3'; // Tablet default
+  } else {
+    defaultSize = '4'; // Desktop default
+  }
+  
+  const sizeToUse = savedGridSize || defaultSize;
+  const validSize = Math.min(parseInt(sizeToUse), maxSize).toString();
   
   gridSizeSelect.value = validSize;
   mobileGridSizeSelect.value = validSize;
   applyGridSize(validSize);
+  
+  console.log('Grid size preference loaded:', {
+    saved: savedGridSize,
+    default: defaultSize,
+    final: validSize,
+    screenWidth: window.innerWidth,
+    maxSize: maxSize
+  });
 }
 
 // Apply grid size to the grid container
@@ -2122,6 +2142,12 @@ function applyGridSize(size) {
   
   // Save preference
   localStorage.setItem('detectionGridSize', size);
+  
+  console.log('Grid size applied and saved:', {
+    size: size,
+    screenWidth: window.innerWidth,
+    savedToLocalStorage: localStorage.getItem('detectionGridSize')
+  });
 }
 
 // Desktop grid size change
@@ -2142,13 +2168,24 @@ mobileGridSizeSelect.addEventListener('change', function() {
 document.addEventListener('DOMContentLoaded', function() {
   filterGridSizeOptions();
   loadGridSizePreference();
-  autoAdjustGridForMobile(); // Auto-adjust for mobile on load
+  // Only auto-adjust if the saved preference is invalid for the current screen size
+  const currentGridSize = parseInt(gridSizeSelect.value);
+  const maxSize = getMaxGridSize();
+  if (currentGridSize > maxSize) {
+    autoAdjustGridForMobile();
+  }
 });
 
 // Update grid options when window is resized
 window.addEventListener('resize', function() {
   filterGridSizeOptions();
-  autoAdjustGridForMobile(); // Auto-adjust when resizing
+  
+  // Only auto-adjust if the current grid size is invalid for the new screen size
+  const currentGridSize = parseInt(gridSizeSelect.value);
+  const maxSize = getMaxGridSize();
+  if (currentGridSize > maxSize) {
+    autoAdjustGridForMobile();
+  }
   
   // Update date formats when switching between mobile/desktop
   const cards = document.querySelectorAll('.card');
