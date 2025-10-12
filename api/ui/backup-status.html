@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backup Status - Security Camera UI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f1116;
+            color: #e8e8e8;
+            line-height: 1.6;
+        }
+        
+        header {
+            padding: 14px 18px;
+            background: #111318;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: end;
+        }
+        
+        header h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: #e8e8e8;
+        }
+        
+        .nav {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .nav a {
+            background: #171a21;
+            color: #e8e8e8;
+            border: 1px solid #2a2f3a;
+            border-radius: 8px;
+            padding: 8px 10px;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        
+        .nav a:hover {
+            background: #2a2f3a;
+        }
+        
+        .nav a.active {
+            background: #375dfb;
+            border-color: #375dfb;
+            color: #fff;
+        }
+        
+        main {
+            padding: 24px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .backup-section {
+            background: #1a1d26;
+            border: 1px solid #2a2f3a;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        
+        .backup-section h2 {
+            color: #e8e8e8;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .backup-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .backup-item {
+            background: #0f1116;
+            border: 1px solid #2a2f3a;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        
+        .backup-item h3 {
+            color: #e8e8e8;
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+        
+        .backup-item .value {
+            color: #8b949e;
+            font-size: 14px;
+        }
+        
+        .backup-list {
+            margin-top: 16px;
+        }
+        
+        .backup-entry {
+            background: #0f1116;
+            border: 1px solid #2a2f3a;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .backup-entry:last-child {
+            margin-bottom: 0;
+        }
+        
+        .backup-info {
+            flex: 1;
+        }
+        
+        .backup-name {
+            color: #e8e8e8;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .backup-details {
+            color: #8b949e;
+            font-size: 12px;
+        }
+        
+        .backup-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        button {
+            background: #375dfb;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        button:hover {
+            background: #4a6cf7;
+        }
+        
+        button.secondary {
+            background: #2a2f3a;
+            color: #e8e8e8;
+        }
+        
+        button.secondary:hover {
+            background: #3a4049;
+        }
+        
+        button.danger {
+            background: #dc3545;
+        }
+        
+        button.danger:hover {
+            background: #c82333;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-online {
+            background: #51cf66;
+        }
+        
+        .status-warning {
+            background: #ffd43b;
+        }
+        
+        .status-offline {
+            background: #ff6b6b;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #375dfb;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .alert {
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .alert.info {
+            background: rgba(55, 93, 251, 0.1);
+            border: 1px solid #375dfb;
+            color: #8bb4ff;
+        }
+        
+        .alert.warning {
+            background: rgba(255, 212, 59, 0.1);
+            border: 1px solid #ffd43b;
+            color: #ffd43b;
+        }
+        
+        .alert.error {
+            background: rgba(255, 107, 107, 0.1);
+            border: 1px solid #ff6b6b;
+            color: #ff6b6b;
+        }
+        
+        .alert.success {
+            background: rgba(81, 207, 102, 0.1);
+            border: 1px solid #51cf66;
+            color: #51cf66;
+        }
+        
+        /* Mobile Navigation Styles */
+        .mobile-menu-toggle {
+            display: none;
+            background: #171a21;
+            color: #e8e8e8;
+            border: 1px solid #2a2f3a;
+            border-radius: 8px;
+            padding: 8px 10px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .mobile-menu-toggle:hover {
+            background: #2a2f3a;
+            transform: scale(1.05);
+        }
+        
+        .mobile-menu-toggle .hamburger {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        
+        .mobile-menu-toggle .hamburger span {
+            width: 18px;
+            height: 2px;
+            background: #e8e8e8;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 1px;
+        }
+        
+        .mobile-menu-toggle.active .hamburger span:nth-child(1) {
+            transform: rotate(45deg) translate(5px, 5px);
+        }
+        
+        .mobile-menu-toggle.active .hamburger span:nth-child(2) {
+            opacity: 0;
+            transform: scaleX(0);
+        }
+        
+        .mobile-menu-toggle.active .hamburger span:nth-child(3) {
+            transform: rotate(-45deg) translate(7px, -6px);
+        }
+        
+        .mobile-nav {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #111318;
+            border: 1px solid #2a2f3a;
+            border-top: none;
+            border-radius: 0 0 12px 12px;
+            padding: 16px;
+            z-index: 1000;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            transform: translateY(-10px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .mobile-nav.show {
+            display: block;
+            transform: translateY(0);
+            opacity: 1;
+        }
+        
+        .mobile-nav .nav {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .mobile-nav .nav a {
+            background: #171a21;
+            color: #e8e8e8;
+            border: 1px solid #2a2f3a;
+            border-radius: 10px;
+            padding: 14px 18px;
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: center;
+            font-weight: 500;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .mobile-nav .nav a::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(55, 93, 251, 0.1), transparent);
+            transition: left 0.5s;
+        }
+        
+        .mobile-nav .nav a:hover::before {
+            left: 100%;
+        }
+        
+        .mobile-nav .nav a:hover {
+            background: #2a2f3a;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(55, 93, 251, 0.2);
+        }
+        
+        .mobile-nav .nav a.active {
+            background: linear-gradient(135deg, #375dfb, #4a6cf7);
+            border-color: #375dfb;
+            color: #fff;
+            box-shadow: 0 4px 16px rgba(55, 93, 251, 0.3);
+        }
+        
+        /* Mobile responsive styles */
+        @media (max-width: 768px) {
+            header {
+                flex-wrap: wrap;
+                position: relative;
+                padding: 12px 16px;
+            }
+            
+            header h1 {
+                font-size: 16px;
+            }
+            
+            .nav {
+                display: none;
+            }
+            
+            .mobile-menu-toggle {
+                display: block;
+                margin-left: auto;
+            }
+            
+            main {
+                padding: 16px;
+            }
+            
+            .backup-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            header {
+                padding: 10px 12px;
+            }
+            
+            header h1 {
+                font-size: 14px;
+            }
+            
+            main {
+                padding: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>💾 Backup Status</h1>
+        <nav class="nav">
+            <a href="/ui/detections.html">AI Detections</a>
+            <a href="/ui/events.html">Events</a>
+            <a href="/ui/stats.html">Stats</a>
+            <a href="/ui/about.html">About</a>
+        </nav>
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <div class="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </button>
+        
+        <!-- Mobile Navigation -->
+        <div class="mobile-nav" id="mobileNav">
+            <nav class="nav">
+                <a href="/ui/detections.html">AI Detections</a>
+                <a href="/ui/events.html">Events</a>
+                <a href="/ui/stats.html">Stats</a>
+                <a href="/ui/about.html">About</a>
+                <a href="/ui/backup-status.html" class="active">💾 Backup Status</a>
+            </nav>
+        </div>
+    </header>
+    
+    <main>
+        <!-- Status Alert -->
+        <div class="alert info" id="statusAlert" style="display: none;">
+            <span>ℹ️</span>
+            <div>
+                <strong>Backup Status:</strong>
+                <span id="statusMessage">Loading backup information...</span>
+            </div>
+        </div>
+        
+        <!-- Backup System Status -->
+        <div class="backup-section">
+            <h2>📊 System Status</h2>
+            <div class="backup-grid" id="backupStatus">
+                <!-- Status will be loaded here -->
+            </div>
+        </div>
+        
+        <!-- Available Backups -->
+        <div class="backup-section">
+            <h2>📁 Available Backups</h2>
+            <div class="backup-list" id="backupList">
+                <!-- Backups will be loaded here -->
+            </div>
+        </div>
+        
+        <!-- Actions -->
+        <div class="backup-section">
+            <h2>⚡ Actions</h2>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button id="refreshStatus">🔄 Refresh Status</button>
+                <button id="createBackup" class="secondary">💾 Create Backup</button>
+                <button id="testBackup" class="secondary">🧪 Test Backup</button>
+            </div>
+        </div>
+    </main>
+    
+    <script>
+        // Load backup status on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Mobile menu functionality
+            const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+            const mobileNav = document.getElementById('mobileNav');
+            
+            // Toggle mobile menu
+            mobileMenuToggle.addEventListener('click', function() {
+                mobileMenuToggle.classList.toggle('active');
+                mobileNav.classList.toggle('show');
+            });
+            
+            // Close mobile menu when clicking outside
+            document.addEventListener('click', function(event) {
+                if (!mobileMenuToggle.contains(event.target) && !mobileNav.contains(event.target)) {
+                    mobileMenuToggle.classList.remove('active');
+                    mobileNav.classList.remove('show');
+                }
+            });
+            
+            loadBackupStatus();
+            loadBackupList();
+        });
+        
+        // Load backup status
+        async function loadBackupStatus() {
+            try {
+                const response = await fetch('/api/backup/status');
+                if (response.ok) {
+                    const status = await response.json();
+                    displayBackupStatus(status);
+                } else {
+                    showStatus('Failed to load backup status', 'error');
+                }
+            } catch (error) {
+                showStatus('Error loading backup status: ' + error.message, 'error');
+            }
+        }
+        
+        // Display backup status
+        function displayBackupStatus(status) {
+            const statusContainer = document.getElementById('backupStatus');
+            
+            const statusHtml = `
+                <div class="backup-item">
+                    <h3>Backup System</h3>
+                    <div class="value">
+                        <span class="status-indicator ${status.enabled ? 'status-online' : 'status-offline'}"></span>
+                        ${status.enabled ? 'Enabled' : 'Disabled'}
+                    </div>
+                </div>
+                <div class="backup-item">
+                    <h3>Backup Interval</h3>
+                    <div class="value">${status.interval || 'Not set'}</div>
+                </div>
+                <div class="backup-item">
+                    <h3>Last Backup</h3>
+                    <div class="value">${status.last_backup ? new Date(status.last_backup * 1000).toLocaleString() : 'Never'}</div>
+                </div>
+                <div class="backup-item">
+                    <h3>Backup Count</h3>
+                    <div class="value">${status.backup_count || 0}</div>
+                </div>
+                <div class="backup-item">
+                    <h3>Backup Directory</h3>
+                    <div class="value">${status.backup_dir || 'Not set'}</div>
+                </div>
+                <div class="backup-item">
+                    <h3>Max Backups</h3>
+                    <div class="value">${status.max_backups || 10}</div>
+                </div>
+            `;
+            
+            statusContainer.innerHTML = statusHtml;
+        }
+        
+        // Load backup list
+        async function loadBackupList() {
+            try {
+                const response = await fetch('/api/backup/list');
+                if (response.ok) {
+                    const data = await response.json();
+                    displayBackupList(data.backups || []);
+                } else {
+                    showStatus('Failed to load backup list', 'error');
+                }
+            } catch (error) {
+                showStatus('Error loading backup list: ' + error.message, 'error');
+            }
+        }
+        
+        // Display backup list
+        function displayBackupList(backups) {
+            const listContainer = document.getElementById('backupList');
+            
+            if (backups.length === 0) {
+                listContainer.innerHTML = '<div class="backup-entry"><div class="backup-info"><div class="backup-name">No backups available</div></div></div>';
+                return;
+            }
+            
+            const listHtml = backups.map(backup => `
+                <div class="backup-entry">
+                    <div class="backup-info">
+                        <div class="backup-name">${backup.filename}</div>
+                        <div class="backup-details">
+                            Size: ${formatSize(backup.size)} | 
+                            Created: ${new Date(backup.created).toLocaleString()}
+                        </div>
+                    </div>
+                    <div class="backup-actions">
+                        <button onclick="restoreBackup('${backup.path}')">Restore</button>
+                        <button onclick="downloadBackup('${backup.path}')" class="secondary">Download</button>
+                    </div>
+                </div>
+            `).join('');
+            
+            listContainer.innerHTML = listHtml;
+        }
+        
+        // Format file size
+        function formatSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        // Show status message
+        function showStatus(message, type) {
+            const alert = document.getElementById('statusAlert');
+            const messageEl = document.getElementById('statusMessage');
+            
+            messageEl.textContent = message;
+            alert.className = `alert ${type}`;
+            alert.style.display = 'flex';
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                alert.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Refresh status
+        document.getElementById('refreshStatus').addEventListener('click', function() {
+            loadBackupStatus();
+            loadBackupList();
+        });
+        
+        // Create backup
+        document.getElementById('createBackup').addEventListener('click', async function() {
+            const button = document.getElementById('createBackup');
+            const originalText = button.innerHTML;
+            
+            button.innerHTML = '<span class="loading"></span> Creating...';
+            button.disabled = true;
+            
+            try {
+                const response = await fetch('/api/backup/create', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showStatus('Backup created successfully', 'success');
+                    loadBackupStatus();
+                    loadBackupList();
+                } else {
+                    showStatus('Failed to create backup: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showStatus('Error creating backup: ' + error.message, 'error');
+            } finally {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        });
+        
+        // Test backup
+        document.getElementById('testBackup').addEventListener('click', async function() {
+            const button = document.getElementById('testBackup');
+            const originalText = button.innerHTML;
+            
+            button.innerHTML = '<span class="loading"></span> Testing...';
+            button.disabled = true;
+            
+            try {
+                const response = await fetch('/api/backup/test', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.valid) {
+                    showStatus('Backup system test passed', 'success');
+                } else {
+                    showStatus('Backup system test failed: ' + (result.error || result.message), 'error');
+                }
+            } catch (error) {
+                showStatus('Error testing backup: ' + error.message, 'error');
+            } finally {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        });
+        
+        // Restore backup
+        async function restoreBackup(backupPath) {
+            if (!confirm('Are you sure you want to restore from this backup? This will replace the current database.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/backup/restore', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ backup_path: backupPath })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showStatus('Database restored successfully', 'success');
+                } else {
+                    showStatus('Failed to restore database: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showStatus('Error restoring database: ' + error.message, 'error');
+            }
+        }
+        
+        // Download backup
+        function downloadBackup(backupPath) {
+            // This would need to be implemented on the server side
+            showStatus('Download functionality not yet implemented', 'warning');
+        }
+    </script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>AI Detections</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <style>
     :root{font-family:system-ui,Arial,sans-serif}
     body{margin:0;background:#0b0c10;color:#e8e8e8}
@@ -38,7 +38,262 @@
     
     @media (max-width:480px){
       .grid-2{grid-template-columns:repeat(2,1fr)}
-      .grid-3,.grid-4,.grid-5,.grid-6,.grid-7,.grid-8{grid-template-columns:repeat(2,1fr)}
+      .grid-3{grid-template-columns:repeat(2,1fr)}
+      .grid-4,.grid-5,.grid-6,.grid-7,.grid-8{grid-template-columns:repeat(2,1fr)}
+    }
+    
+    /* Enhanced mobile grid optimizations */
+    @media (max-width: 768px) {
+      .grid {
+        gap: 8px;
+        padding: 0 4px;
+      }
+      
+      .card {
+        border-radius: 8px;
+        min-height: 180px;
+      }
+      
+      .thumb {
+        border-radius: 6px;
+        min-height: 100px;
+      }
+      
+      .meta {
+        padding: 8px;
+        font-size: 10px;
+        flex-direction: column;
+        gap: 4px;
+        line-height: 1.2;
+      }
+      
+      .meta > div {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        width: 100%;
+        flex-wrap: wrap;
+      }
+      
+      .camera {
+        font-size: 11px;
+        font-weight: 600;
+      }
+      
+      .ts {
+        font-size: 9px;
+        opacity: 0.8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+      }
+      
+      .detection-badges {
+        max-width: 80px;
+        top: 4px;
+        right: 4px;
+        gap: 2px;
+      }
+      
+      .detection-badge {
+        font-size: 8px;
+        padding: 1px 3px;
+        border-radius: 3px;
+      }
+      
+      .detection-info {
+        font-size: 9px;
+        padding: 6px;
+        margin-top: 6px;
+        line-height: 1.3;
+      }
+      
+      .comparison-view {
+        margin-top: 6px;
+        gap: 4px;
+      }
+      
+      .comparison-view button {
+        padding: 3px 6px;
+        font-size: 9px;
+        border-radius: 3px;
+        min-height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .grid {
+        gap: 6px;
+        padding: 0 2px;
+      }
+      
+      .card {
+        border-radius: 8px;
+        min-height: 160px;
+      }
+      
+      .thumb {
+        border-radius: 6px;
+        min-height: 90px;
+      }
+      
+      .meta {
+        padding: 8px;
+        font-size: 10px;
+        flex-direction: column;
+        gap: 4px;
+        line-height: 1.2;
+      }
+      
+      .meta > div {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        width: 100%;
+        flex-wrap: wrap;
+      }
+      
+      .camera {
+        font-size: 11px;
+        font-weight: 600;
+      }
+      
+      .ts {
+        font-size: 9px;
+        opacity: 0.8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+      }
+      
+      .detection-badges {
+        max-width: 70px;
+        top: 4px;
+        right: 4px;
+        gap: 2px;
+      }
+      
+      .detection-badge {
+        font-size: 8px;
+        padding: 1px 3px;
+        border-radius: 3px;
+      }
+      
+      .detection-info {
+        font-size: 9px;
+        padding: 6px;
+        margin-top: 6px;
+        line-height: 1.3;
+      }
+      
+      .comparison-view {
+        margin-top: 6px;
+        gap: 4px;
+      }
+      
+      .comparison-view button {
+        padding: 3px 6px;
+        font-size: 9px;
+        border-radius: 3px;
+        min-height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    }
+    
+    /* Ultra-small screens (very small phones) */
+    @media (max-width: 360px) {
+      .grid {
+        gap: 4px;
+        padding: 0 1px;
+      }
+      
+      .card {
+        min-height: 150px;
+      }
+      
+      .thumb {
+        min-height: 80px;
+      }
+      
+      .meta {
+        padding: 6px;
+        font-size: 9px;
+      }
+      
+      .meta > div {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        width: 100%;
+        flex-wrap: wrap;
+      }
+      
+      .ts {
+        font-size: 8px;
+        opacity: 0.8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+      }
+      
+      .detection-badges {
+        max-width: 60px;
+      }
+      
+      .detection-badge {
+        font-size: 7px;
+        padding: 1px 2px;
+      }
+    }
+    
+    /* Mobile single-column layout for very small screens - only for grid-1 */
+    @media (max-width: 320px) {
+      .grid-1 {
+        grid-template-columns: 1fr;
+      }
+      /* Keep 2-column layout for grid-2 on very small screens */
+      .grid-2 {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      /* Force larger grids to 2 columns on very small screens */
+      .grid-3, .grid-4, .grid-5, .grid-6, .grid-7, .grid-8 {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      
+      .card {
+        min-height: 200px;
+      }
+      
+      .thumb {
+        min-height: 120px;
+      }
+      
+      .meta {
+        padding: 8px;
+        font-size: 10px;
+      }
+      
+      .detection-badges {
+        max-width: 80px;
+      }
+      
+      .detection-badge {
+        font-size: 8px;
+        padding: 2px 4px;
+      }
+      
+      .comparison-view button {
+        min-height: 28px;
+        font-size: 10px;
+      }
     }
     .card{contain:layout style paint;will-change:transform}
     .card{background:#111318;border:1px solid #2a2f3a;border-radius:14px;overflow:hidden;position:relative}
@@ -46,6 +301,7 @@
     .thumb{width:100%;display:block;aspect-ratio:16/9;object-fit:cover;background:#0f1116;cursor:pointer;transition:all 0.2s}
     .thumb:hover{opacity:0.9;transform:scale(1.02)}
     .thumb:active{transform:scale(0.98)}
+    video.thumb{background:#0f1116;border-radius:8px}
     .meta{padding:12px;font-size:12px;opacity:.85;display:flex;justify-content:space-between;gap:6px}
     .camera{font-weight:600}
     .ts{opacity:.8}
@@ -418,7 +674,6 @@
     .action-buttons button {
       flex: 1;
     }
-  }
   
   /* Mobile scroll-to-top button */
   .scroll-to-top {
@@ -494,6 +749,41 @@
   }
   
     
+    /* Enhanced touch interactions for mobile */
+    @media (max-width: 768px) {
+      .thumb {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
+      
+      .thumb:active {
+        transform: scale(0.95);
+        transition: transform 0.1s ease;
+      }
+      
+      .comparison-view button {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        min-height: 32px;
+        min-width: 44px; /* iOS recommended minimum touch target */
+      }
+      
+      .comparison-view button:active {
+        transform: scale(0.95);
+        transition: transform 0.1s ease;
+      }
+      
+      .card {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
+      
+      .card:active {
+        transform: scale(0.98);
+        transition: transform 0.1s ease;
+      }
+    }
+    
     /* Mobile responsive styles */
     @media (max-width: 768px) {
       header {
@@ -517,6 +807,10 @@
       .mobile-menu-toggle {
         display: block;
         margin-left: auto;
+        min-height: 44px;
+        min-width: 44px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
       }
       
       .mobile-nav .mobile-controls {
@@ -568,7 +862,7 @@
       }
       
       .grid {
-        /* User choice respected */
+        gap: 8px;
       }
       
       .card {
@@ -634,7 +928,7 @@
         <option value="7">7 per row</option>
         <option value="8" selected>8 per row</option>
       </select>
-      <button id="toggleView" class="primary">🔍 Detection Images Only</button>
+      <button id="toggleView" class="primary" style="background:#44ff44;border-color:#44ff44;">🖼️ Show All Events</button>
       <button id="apply" class="primary">Apply</button>
       <button id="reset">Reset</button>
       <button id="refresh">Refresh</button>
@@ -705,20 +999,20 @@
           <div class="grid-size-section">
             <h4>📐 Grid Size</h4>
             <select id="mobileGridSize">
-              <option value="1">1 per row</option>
-              <option value="2" selected>2 per row</option>
-              <option value="3">3 per row</option>
-              <option value="4">4 per row</option>
-              <option value="5">5 per row</option>
-              <option value="6">6 per row</option>
-              <option value="7">7 per row</option>
-              <option value="8">8 per row</option>
+              <option value="1">1 per row (Single Column)</option>
+              <option value="2" selected>2 per row (Mobile - Recommended)</option>
+              <option value="3">3 per row (Tablet)</option>
+              <option value="4">4 per row (Desktop)</option>
+              <option value="5">5 per row (Desktop)</option>
+              <option value="6">6 per row (Desktop)</option>
+              <option value="7">7 per row (Desktop)</option>
+              <option value="8">8 per row (Desktop)</option>
             </select>
           </div>
           
           <div class="actions-section">
             <h4>🎛️ Actions</h4>
-            <button id="mobileToggleView" class="primary">🔍 Detection Images Only</button>
+            <button id="mobileToggleView" class="primary" style="background:#44ff44;border-color:#44ff44;">🖼️ Show All Events</button>
             <div class="action-buttons">
               <button id="mobileApply" class="primary">Apply</button>
               <button id="mobileReset">Reset</button>
@@ -763,7 +1057,8 @@ let sentinel;
 let autoRefreshInterval;
 let lastEventCount = 0;
 let debounceTimer;
-let showDetectionImagesOnly = false;
+let showDetectionImagesOnly = true;
+let currentlyPlayingVideo = null;
 
 function qs(obj){const u=new URLSearchParams();for(const[k,v]of Object.entries(obj)) if(v!==''&&v!=null) u.append(k,String(v)); return u.toString();}
 function fmtMB(b){return (b/1e6).toFixed(1)+' MB';}
@@ -780,6 +1075,41 @@ function fmtTs(s){
     second: '2-digit',
     hour12: true
   }) + ' CT';
+}
+
+function fmtTsMobile(s){
+  // Mobile-friendly date format - shorter and more compact
+  const date = new Date(s*1000);
+  const dateStr = date.toLocaleDateString('en-US', {
+    timeZone: 'America/Chicago',
+    month: '2-digit',
+    day: '2-digit',
+    year: '2-digit'
+  });
+  const timeStr = date.toLocaleTimeString('en-US', {
+    timeZone: 'America/Chicago',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+  return `${dateStr} ${timeStr}`;
+}
+
+function fmtTsUltraMobile(s){
+  // Ultra-compact format for very small screens
+  const date = new Date(s*1000);
+  const dateStr = date.toLocaleDateString('en-US', {
+    timeZone: 'America/Chicago',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  const timeStr = date.toLocaleTimeString('en-US', {
+    timeZone: 'America/Chicago',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+  return `${dateStr} ${timeStr}`;
 }
 
 async function fetchEvents(params={}) {
@@ -804,32 +1134,118 @@ function hideStatus() {
   status.style.display = 'none';
 }
 
-function openFullscreen(imageSrc) {
+function stopAllVideos() {
+  // Stop the currently playing video
+  if (currentlyPlayingVideo) {
+    currentlyPlayingVideo.pause();
+    currentlyPlayingVideo.currentTime = 0;
+    currentlyPlayingVideo.style.display = 'none';
+    // Remove playing class from the card and show thumbnail
+    const card = currentlyPlayingVideo.closest('.card');
+    if (card) {
+      card.classList.remove('playing');
+      const img = card.querySelector('img');
+      if (img) img.style.display = 'block';
+    }
+    currentlyPlayingVideo = null;
+  }
+  
+  // Stop ALL videos in the document, regardless of their state
+  const allVideos = document.querySelectorAll('video');
+  allVideos.forEach(video => {
+    if (!video.paused) {
+      video.pause();
+      video.currentTime = 0;
+      video.style.display = 'none';
+      // Show the thumbnail image for each stopped video
+      const card = video.closest('.card');
+      if (card) {
+        card.classList.remove('playing');
+        const img = card.querySelector('img');
+        if (img) img.style.display = 'block';
+      }
+    }
+  });
+}
+
+function openFullscreen(mediaSrc) {
   fullscreen.style.display = 'flex';
   fullscreenLoading.style.display = 'block';
   fullscreenImg.style.display = 'none';
   document.body.style.overflow = 'hidden';
   
-  fullscreenImg.onload = () => {
-    fullscreenLoading.style.display = 'none';
-    fullscreenImg.style.display = 'block';
-    fullscreenImg.onclick = (e) => {
+  // Check if it's a video file
+  const isVideo = mediaSrc.includes('.mp4') || mediaSrc.includes('/stream/') || mediaSrc.includes('video/mp4');
+  
+  if (isVideo) {
+    // Create video element for fullscreen
+    const fullscreenVideo = document.createElement('video');
+    fullscreenVideo.style.maxWidth = '100%';
+    fullscreenVideo.style.maxHeight = '100%';
+    fullscreenVideo.style.objectFit = 'contain';
+    fullscreenVideo.controls = true;
+    fullscreenVideo.autoplay = true;
+    fullscreenVideo.muted = true;
+    fullscreenVideo.disablePictureInPicture = true;
+    
+    fullscreenVideo.onloadeddata = () => {
+      fullscreenLoading.style.display = 'none';
+      fullscreenImg.style.display = 'none';
+      fullscreenVideo.style.display = 'block';
+    };
+    
+    fullscreenVideo.onerror = () => {
+      fullscreenLoading.textContent = 'Failed to load video';
+      fullscreenLoading.style.display = 'block';
+    };
+    
+    fullscreenVideo.onclick = (e) => {
       e.stopPropagation();
       closeFullscreen();
     };
-  };
-  
-  fullscreenImg.onerror = () => {
-    fullscreenLoading.textContent = 'Failed to load image';
-    fullscreenLoading.style.display = 'block';
-  };
-  
-  fullscreenImg.src = imageSrc;
+    
+    // Replace the image with video temporarily
+    const parent = fullscreenImg.parentNode;
+    parent.insertBefore(fullscreenVideo, fullscreenImg);
+    
+    // Use source element approach
+    fullscreenVideo.innerHTML = `<source src="${mediaSrc}" type="video/mp4">`;
+    fullscreenVideo.load();
+    
+    // Store reference for cleanup
+    fullscreen._currentVideo = fullscreenVideo;
+  } else {
+    // Handle as image
+    fullscreenImg.onload = () => {
+      fullscreenLoading.style.display = 'none';
+      fullscreenImg.style.display = 'block';
+      fullscreenImg.onclick = (e) => {
+        e.stopPropagation();
+        closeFullscreen();
+      };
+    };
+    
+    fullscreenImg.onerror = () => {
+      fullscreenLoading.textContent = 'Failed to load image';
+      fullscreenLoading.style.display = 'block';
+    };
+    
+    fullscreenImg.src = mediaSrc;
+  }
 }
 
 function closeFullscreen() {
   fullscreen.style.display = 'none';
   fullscreenImg.src = '';
+  fullscreenImg.style.display = 'block';
+  
+  // Clean up video if it exists
+  if (fullscreen._currentVideo) {
+    fullscreen._currentVideo.pause();
+    fullscreen._currentVideo.remove();
+    fullscreen._currentVideo = null;
+  }
+  
   document.body.style.overflow = 'auto';
 }
 
@@ -846,6 +1262,15 @@ function card(e){
   img.className = 'thumb'; 
   img.loading = 'lazy'; 
   img.decoding = 'async';
+  
+  // Create video element (initially hidden)
+  const video = document.createElement('video');
+  video.className = 'thumb';
+  video.style.display = 'none';
+  video.controls = true;
+  video.preload = 'none'; // Don't preload until clicked
+  video.muted = true; // Start muted for better UX
+  video.disablePictureInPicture = true; // Disable picture-in-picture
   
   // Determine which image to show based on event type and toggle state
   if (e.camera === 'DETECTION') {
@@ -879,6 +1304,7 @@ function card(e){
     img.title = 'Original file has been deleted';
   };
   div.appendChild(img);
+  div.appendChild(video);
   
   // Add detection badges if available
   if (e.detections && e.detections.length > 0) {
@@ -914,7 +1340,17 @@ function card(e){
   const meta = document.createElement('div'); 
   meta.className = 'meta';
   const left = document.createElement('div'); 
-  left.innerHTML = `<div class="camera">${e.camera||'—'}</div><div class="ts">${fmtTs(e.startTs)}</div>`;
+  // Use appropriate date format based on screen size
+  const screenWidth = window.innerWidth;
+  let dateFormat;
+  if (screenWidth <= 360) {
+    dateFormat = fmtTsUltraMobile(e.startTs);
+  } else if (screenWidth <= 768) {
+    dateFormat = fmtTsMobile(e.startTs);
+  } else {
+    dateFormat = fmtTs(e.startTs);
+  }
+  left.innerHTML = `<div class="camera">${e.camera||'—'}</div><div class="ts">${dateFormat}</div>`;
   const right = document.createElement('div'); 
   right.textContent = fmtMB(e.sizeBytes);
   meta.append(left, right); 
@@ -938,19 +1374,28 @@ function card(e){
     
     const originalBtn = document.createElement('button');
     originalBtn.textContent = 'Original';
-    originalBtn.onclick = (e) => {
-      e.stopPropagation();
+    originalBtn.onclick = (event) => {
+      event.stopPropagation();
+      // Show image, hide video
+      img.style.display = 'block';
+      video.style.display = 'none';
+      video.pause(); // Pause video when switching to image
       img.src = '/thumb/' + e.id;
       img.title = 'Original Image';
       originalBtn.classList.add('active');
       detectionBtn.classList.remove('active');
+      videoBtn.classList.remove('active');
     };
     
     const detectionBtn = document.createElement('button');
     detectionBtn.textContent = 'Detection';
     detectionBtn.classList.add('active');
-    detectionBtn.onclick = (e) => {
-      e.stopPropagation();
+    detectionBtn.onclick = (event) => {
+      event.stopPropagation();
+      // Show image, hide video
+      img.style.display = 'block';
+      video.style.display = 'none';
+      video.pause(); // Pause video when switching to image
       if (e.detectionData) {
         try {
           const detectionData = JSON.parse(e.detectionData);
@@ -964,16 +1409,165 @@ function card(e){
       }
       detectionBtn.classList.add('active');
       originalBtn.classList.remove('active');
+      videoBtn.classList.remove('active');
+    };
+    
+    // Show video button for all files (we'll link to the corresponding MP4)
+    const videoBtn = document.createElement('button');
+    videoBtn.textContent = 'Video';
+    videoBtn.onclick = (event) => {
+      event.stopPropagation();
+      console.log('Video button clicked for event:', e.id);
+      
+      // Stop any currently playing video first
+      stopAllVideos();
+      
+      // Hide image, show video
+      img.style.display = 'none';
+      video.style.display = 'block';
+      
+      // Set poster to thumbnail
+      video.poster = '/thumb/' + e.id;
+      console.log('Set video poster to:', '/thumb/' + e.id);
+      
+      // Use source element like events page
+      if (!video.src && !video.currentSrc) {
+        console.log('Loading video source...');
+        
+        // Construct MP4 path from JPG path
+        let videoPath = e.path;
+        if (videoPath && videoPath.toLowerCase().endsWith('.jpg')) {
+          videoPath = videoPath.replace(/\.jpg$/i, '.mp4');
+          console.log('Original JPG path:', e.path);
+          console.log('Constructed MP4 path:', videoPath);
+        }
+        
+        // Use the MP4 path for the video source
+        video.innerHTML = `<source src="/stream/${e.id}?path=${encodeURIComponent(videoPath)}" type="video/mp4">`;
+        video.load(); // Load the video source
+        
+        // Test the stream endpoint directly
+        console.log('Testing stream endpoint...');
+        console.log('Event data:', e);
+        console.log('Event path:', e.path);
+        console.log('Video path:', videoPath);
+        fetch(`/stream/${e.id}?path=${encodeURIComponent(videoPath)}`)
+          .then(response => {
+            console.log('Stream endpoint response:', response.status, response.statusText);
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.blob();
+          })
+          .then(blob => {
+            console.log('Stream endpoint success - blob size:', blob.size, 'type:', blob.type);
+            if (blob.type === 'image/jpeg') {
+              console.log('WARNING: Stream endpoint returned JPEG instead of video!');
+              console.log('Event path:', e.path);
+              console.log('Event is likely an image file, not a video file');
+            }
+          })
+          .catch(err => {
+            console.error('Stream endpoint failed:', err);
+          });
+      }
+      
+      // Set as currently playing video and auto-play
+      currentlyPlayingVideo = video;
+      div.classList.add('playing');
+      
+      // Auto-play the video when ready
+      video.oncanplay = () => {
+        console.log('Video ready, auto-playing...');
+        video.play().then(() => {
+          console.log('Video started playing successfully');
+        }).catch((err) => {
+          console.error('Video autoplay error:', err);
+        });
+      };
+      
+      video.title = 'Video Recording';
+      videoBtn.classList.add('active');
+      originalBtn.classList.remove('active');
+      detectionBtn.classList.remove('active');
     };
     
     comparisonView.appendChild(originalBtn);
     comparisonView.appendChild(detectionBtn);
+    comparisonView.appendChild(videoBtn);
     div.appendChild(comparisonView);
   }
   
-  // Image click handler
+  // Image and video click handlers
   img.onclick = () => {
     openFullscreen(img.src);
+  };
+  
+  video.onclick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    console.log('Video clicked - currentlyPlayingVideo:', currentlyPlayingVideo === video, 'video.paused:', video.paused);
+    
+    // Check if this video is the currently tracked video
+    const isCurrentlyTracked = currentlyPlayingVideo === video;
+    
+    if (isCurrentlyTracked) {
+      // This is the currently tracked video - toggle play/pause based on actual browser state
+      if (video.paused) {
+        console.log('Video is paused, resuming...');
+        video.play().then(() => {
+          console.log('Video resumed successfully');
+          div.classList.add('playing');
+        }).catch((err) => {
+          console.error('Video resume failed:', err);
+          div.classList.remove('playing');
+        });
+      } else {
+        console.log('Video is playing, pausing...');
+        video.pause();
+        div.classList.remove('playing');
+        console.log('Video paused, state after pause:', video.paused);
+        
+        // Check if something is causing it to play again
+        setTimeout(() => {
+          console.log('Video state after 100ms:', video.paused);
+          if (!video.paused) {
+            console.log('WARNING: Video started playing again after pause!');
+          }
+        }, 100);
+      }
+    } else {
+      // This is a different video or no video is playing, start this one
+      console.log('Starting new video');
+      // Stop any other currently playing video first
+      stopAllVideos();
+      
+      // Hide image, show video
+      img.style.display = 'none';
+      video.style.display = 'block';
+      currentlyPlayingVideo = video;
+      
+      // Add playing class to the card
+      div.classList.add('playing');
+      
+      // Only load video when user actually clicks to play
+      if (!video.src && !video.currentSrc) {
+        video.load(); // Load the video source
+      }
+      
+      // Clean up when video ends
+      video.onended = () => {
+        video.style.display = 'none';
+        div.classList.remove('playing');
+        currentlyPlayingVideo = null;
+        // Show the thumbnail image again
+        const img = div.querySelector('img');
+        if (img) img.style.display = 'block';
+      };
+      
+      video.play().catch(()=>{}); 
+    }
   };
   
   return div;
@@ -1087,14 +1681,22 @@ document.getElementById('refresh').onclick = ()=>{
 document.getElementById('toggleView').onclick = ()=>{
   showDetectionImagesOnly = !showDetectionImagesOnly;
   const button = document.getElementById('toggleView');
+  const mobileButton = document.getElementById('mobileToggleView');
+  
   if (showDetectionImagesOnly) {
     button.textContent = '🖼️ Show All Events';
     button.style.background = '#44ff44';
     button.style.borderColor = '#44ff44';
+    mobileButton.textContent = '🖼️ Show All Events';
+    mobileButton.style.background = '#44ff44';
+    mobileButton.style.borderColor = '#44ff44';
   } else {
     button.textContent = '🔍 Detection Images Only';
     button.style.background = '#375dfb';
     button.style.borderColor = '#375dfb';
+    mobileButton.textContent = '🔍 Detection Images Only';
+    mobileButton.style.background = '#375dfb';
+    mobileButton.style.borderColor = '#375dfb';
   }
   
   // Reload the current page to update the view
@@ -1370,12 +1972,28 @@ const gridContainer = document.querySelector('.grid');
 // Determine maximum available grid size based on screen width
 function getMaxGridSize() {
   const screenWidth = window.innerWidth;
-  if (screenWidth <= 480) {
-    return 2; // Mobile: max 2 columns
+  if (screenWidth <= 320) {
+    return 2; // Ultra-small mobile: max 2 columns (preserve 2-column layout)
+  } else if (screenWidth <= 480) {
+    return 2; // Mobile: 2 columns (preserve 2-column layout)
   } else if (screenWidth <= 768) {
-    return 4; // Tablet: max 4 columns
+    return 3; // Tablet: max 3 columns
   } else {
     return 8; // Desktop: max 8 columns
+  }
+}
+
+// Auto-adjust grid size for mobile
+function autoAdjustGridForMobile() {
+  const screenWidth = window.innerWidth;
+  const currentGridSize = parseInt(gridSizeSelect.value);
+  const maxSize = getMaxGridSize();
+  
+  if (currentGridSize > maxSize) {
+    const newSize = maxSize.toString();
+    gridSizeSelect.value = newSize;
+    mobileGridSizeSelect.value = newSize;
+    applyGridSize(newSize);
   }
 }
 
@@ -1456,11 +2074,25 @@ mobileGridSizeSelect.addEventListener('change', function() {
 document.addEventListener('DOMContentLoaded', function() {
   filterGridSizeOptions();
   loadGridSizePreference();
+  autoAdjustGridForMobile(); // Auto-adjust for mobile on load
 });
 
 // Update grid options when window is resized
 window.addEventListener('resize', function() {
   filterGridSizeOptions();
+  autoAdjustGridForMobile(); // Auto-adjust when resizing
+  
+  // Update date formats when switching between mobile/desktop
+  const cards = document.querySelectorAll('.card');
+  cards.forEach(card => {
+    const tsElement = card.querySelector('.ts');
+    if (tsElement) {
+      // Get the original timestamp from the data attribute or reconstruct it
+      const isMobile = window.innerWidth <= 768;
+      // For now, we'll keep the existing format since we don't have easy access to original timestamp
+      // This could be improved by storing the original timestamp in a data attribute
+    }
+  });
 });
 
 // Mobile date range functions
@@ -1476,6 +2108,40 @@ document.getElementById('to').addEventListener('change', populateCameraDropdown)
 // initial load
 populateCameraDropdown();
 loadPage(false);
+
+// Stop videos when scrolling away
+let scrollTimeout;
+window.addEventListener('scroll', function() {
+  // Stop video immediately when scrolling starts
+  if (currentlyPlayingVideo) {
+    // Check if the currently playing video is still visible
+    const rect = currentlyPlayingVideo.getBoundingClientRect();
+    const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
+    
+    if (!isVisible) {
+      console.log('Video scrolled out of view, stopping immediately...');
+      currentlyPlayingVideo.pause();
+      currentlyPlayingVideo.currentTime = 0;
+      currentlyPlayingVideo.style.display = 'none';
+      const card = currentlyPlayingVideo.closest('.card');
+      if (card) {
+        card.classList.remove('playing');
+        // Show the thumbnail image again
+        const img = card.querySelector('img');
+        if (img) img.style.display = 'block';
+      }
+      currentlyPlayingVideo = null;
+    }
+  }
+  
+  // Clear existing timeout
+  clearTimeout(scrollTimeout);
+  
+  // Set a new timeout for additional cleanup after scrolling stops
+  scrollTimeout = setTimeout(function() {
+    // Additional cleanup if needed
+  }, 500);
+});
 
 // Ensure mobile controls are synced after initial load
 setTimeout(() => {

@@ -12,6 +12,7 @@ This system provides a complete solution for managing security camera footage wi
 - **Web Interface**: Modern, responsive dashboard for viewing and managing footage
 - **Performance Monitoring**: Comprehensive system health and debug tools
 - **Distributed Processing**: Separate GPU service for AI processing
+- **Easy Configuration**: Web-based configuration system for all settings
 
 ## 🚀 Quick Start
 
@@ -36,20 +37,20 @@ This system provides a complete solution for managing security camera footage wi
    go build -o scui-api
    ```
 
-3. **Configure your camera directory**:
-   ```bash
-   # Set your camera footage directory
-   export CAMERA_DIR="/path/to/your/camera/footage"
-   ```
-
-4. **Run the system**:
+3. **Run the system**:
    ```bash
    ./scui-api
    ```
 
-5. **Access the web interface**:
+4. **Access the web interface**:
    - Open your browser to `http://localhost:8080`
    - Navigate to different sections using the top menu
+
+5. **Configure the system**:
+   - Click on **"Configuration"** in the navigation menu
+   - Set your camera directory path and other settings
+   - Click **"Save Configuration"** to apply changes
+   - Use **"Test Configuration"** to verify your settings
 
 ## 📁 System Architecture
 

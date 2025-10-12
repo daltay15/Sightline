@@ -216,14 +216,19 @@ LIMIT ? OFFSET ?`
 		id := c.Param("id")
 		var path string
 
-		// Use prepared statement for better performance
-		preparedStmts.mu.RLock()
-		err := preparedStmts.GetStreamPath.QueryRow(id).Scan(&path)
-		preparedStmts.mu.RUnlock()
+		// Check if a specific path is provided as query parameter
+		if customPath := c.Query("path"); customPath != "" {
+			path = customPath
+		} else {
+			// Use prepared statement for better performance
+			preparedStmts.mu.RLock()
+			err := preparedStmts.GetStreamPath.QueryRow(id).Scan(&path)
+			preparedStmts.mu.RUnlock()
 
-		if err != nil {
-			c.Status(http.StatusNotFound)
-			return
+			if err != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
 		}
 
 		// Check if file actually exists
@@ -239,10 +244,8 @@ LIMIT ? OFFSET ?`
 		// Check if this is a range request (video seeking) or just metadata
 		rangeHeader := c.GetHeader("Range")
 		if rangeHeader == "" {
-			// No range request - likely metadata preload, return 206 with minimal data
-			c.Header("Content-Length", "0")
-			c.Header("Content-Range", "bytes 0-0/1")
-			c.Status(http.StatusPartialContent)
+			// No range request - serve the full file for initial load
+			http.ServeFile(c.Writer, c.Request, path)
 			return
 		}
 

@@ -1227,6 +1227,8 @@ document.addEventListener('click', function(event) {
 // Load all data on page load
 document.addEventListener('DOMContentLoaded', async () => {
   await refreshAllData();
+  // Also load database health separately to ensure query time shows up
+  await loadDatabaseHealth();
   startAutoRefresh();
 });
 

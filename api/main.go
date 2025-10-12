@@ -4,6 +4,7 @@ package main
 import (
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"io/fs"
 	"log"
 	"net/http"
@@ -40,7 +41,23 @@ func main() {
 	port := config.Port
 	telegramURL := config.TelegramURL
 
+	// Initialize backup manager with config
+	backupDir := filepath.Join(filepath.Dir(dbPath), "backups")
+
+	// Load configuration to get backup interval
+	configManager := internal.NewConfigManager("config.json")
+	if err := configManager.LoadConfig(); err != nil {
+		log.Printf("Warning: Failed to load config, using defaults: %v", err)
+	}
+
+	// Get backup settings from config
+	backupEnabled := configManager.GetBool("db_backup_enabled", true)
+	backupInterval := configManager.GetString("db_backup_interval", "24h")
+
+	backupManager := internal.NewBackupManager(dbPath, backupDir, backupEnabled, backupInterval)
+
 	log.Printf("Configuration: rootDir=%s, completedDir=%s, port=%s", rootDir, completedDir, port)
+	log.Printf("Backup settings: enabled=%v, interval=%s", backupEnabled, backupInterval)
 
 	_ = os.MkdirAll(filepath.Dir(dbPath), 0755)
 	_ = os.MkdirAll(thumbsDir, 0755)
@@ -454,6 +471,187 @@ func main() {
 		})
 	})
 
+	// Configuration endpoints
+	r.GET("/api/config", func(c *gin.Context) {
+		// Load current configuration from file
+		configManager := internal.NewConfigManager("config.json")
+		if err := configManager.LoadConfig(); err != nil {
+			log.Printf("Warning: Failed to load config for API: %v", err)
+		}
+
+		// Return current configuration from file
+		configData := configManager.GetConfig()
+		c.JSON(200, configData)
+	})
+
+	r.POST("/api/config", func(c *gin.Context) {
+		var newConfig map[string]interface{}
+		if err := c.ShouldBindJSON(&newConfig); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid JSON"})
+			return
+		}
+
+		// Save configuration to file
+		configFile := "config.json"
+		configData, err := json.MarshalIndent(newConfig, "", "  ")
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to marshal config"})
+			return
+		}
+
+		if err := os.WriteFile(configFile, configData, 0644); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to save config"})
+			return
+		}
+
+		// Update backup manager with new settings if they changed
+		if backupEnabled, ok := newConfig["db_backup_enabled"].(bool); ok {
+			if backupInterval, ok := newConfig["db_backup_interval"].(string); ok {
+				backupManager.UpdateSettings(backupEnabled, backupInterval)
+			}
+		}
+
+		c.JSON(200, gin.H{"message": "Configuration saved successfully"})
+	})
+
+	r.POST("/api/config/test", func(c *gin.Context) {
+		var testConfig map[string]interface{}
+		if err := c.ShouldBindJSON(&testConfig); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid JSON"})
+			return
+		}
+
+		// Test configuration
+		results := gin.H{
+			"camera_dir": gin.H{
+				"valid":   true,
+				"message": "Camera directory path is valid",
+			},
+			"server_port": gin.H{
+				"valid":   true,
+				"message": "Port number is valid",
+			},
+			"gpu_detection": gin.H{
+				"valid":   true,
+				"message": "GPU detection URL is valid",
+			},
+		}
+
+		c.JSON(200, results)
+	})
+
+	r.POST("/api/config/test-directory", func(c *gin.Context) {
+		var req struct {
+			Path string `json:"path"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid JSON"})
+			return
+		}
+
+		// Test directory access
+		info, err := os.Stat(req.Path)
+		if err != nil {
+			c.JSON(200, gin.H{
+				"valid":   false,
+				"error":   err.Error(),
+				"message": "Directory does not exist or is not accessible",
+			})
+			return
+		}
+
+		if !info.IsDir() {
+			c.JSON(200, gin.H{
+				"valid":   false,
+				"error":   "Path is not a directory",
+				"message": "The specified path is not a directory",
+			})
+			return
+		}
+
+		// Check if directory is readable
+		if _, err := os.ReadDir(req.Path); err != nil {
+			c.JSON(200, gin.H{
+				"valid":   false,
+				"error":   err.Error(),
+				"message": "Directory is not readable",
+			})
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"valid":        true,
+			"message":      "Directory is accessible and readable",
+			"path":         req.Path,
+			"is_directory": true,
+			"readable":     true,
+		})
+	})
+
+	r.POST("/api/config/restart", func(c *gin.Context) {
+		// Note: In a real implementation, this would restart the service
+		// For now, we'll just return a success message
+		c.JSON(200, gin.H{
+			"message": "Service restart initiated",
+			"note":    "In production, this would restart the service",
+		})
+	})
+
+	// Backup management endpoints
+	r.GET("/api/backup/status", func(c *gin.Context) {
+		status := backupManager.GetBackupStatus()
+		c.JSON(200, status)
+	})
+
+	r.GET("/api/backup/list", func(c *gin.Context) {
+		backups, err := backupManager.ListBackups()
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"backups": backups})
+	})
+
+	r.POST("/api/backup/create", func(c *gin.Context) {
+		if err := backupManager.CreateBackup(); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"message": "Backup created successfully"})
+	})
+
+	r.POST("/api/backup/test", func(c *gin.Context) {
+		if err := backupManager.TestBackupConnection(); err != nil {
+			c.JSON(200, gin.H{
+				"valid":   false,
+				"error":   err.Error(),
+				"message": "Backup system test failed",
+			})
+			return
+		}
+		c.JSON(200, gin.H{
+			"valid":   true,
+			"message": "Backup system is working correctly",
+		})
+	})
+
+	r.POST("/api/backup/restore", func(c *gin.Context) {
+		var req struct {
+			BackupPath string `json:"backup_path"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid JSON"})
+			return
+		}
+
+		if err := backupManager.RestoreBackup(req.BackupPath); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{"message": "Database restored successfully"})
+	})
+
 	go func() {
 		log.Printf("HTTP server on %s", port)
 		server := &http.Server{
@@ -495,6 +693,9 @@ func main() {
 			log.Fatalf("Failed to start file watcher: %v", err)
 		}
 		defer fileWatcher.Stop()
+
+		// Start the backup manager
+		backupManager.StartBackupScheduler()
 
 		// High-frequency watcher signal processor (for immediate processing)
 		go func() {

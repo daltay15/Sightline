@@ -330,6 +330,12 @@
             <button id="debug-stats-btn" style="background: #375dfb; color: white; border: 1px solid #375dfb; border-radius: 8px; padding: 10px 20px; cursor: pointer; flex: 1; min-width: 200px;">
               🔧 Debug Stats
             </button>
+            <button id="config-btn" style="background: #28a745; color: white; border: 1px solid #28a745; border-radius: 8px; padding: 10px 20px; cursor: pointer; flex: 1; min-width: 200px;">
+              ⚙️ Configuration
+            </button>
+            <button id="backup-btn" style="background: #6f42c1; color: white; border: 1px solid #6f42c1; border-radius: 8px; padding: 10px 20px; cursor: pointer; flex: 1; min-width: 200px;">
+              💾 Backup Status
+            </button>
           </div>
           <div id="cleanup-result" style="margin-top: 10px; font-size: 14px;"></div>
         </div>
@@ -504,6 +510,16 @@ document.getElementById('cleanup-btn').addEventListener('click', async () => {
 // Debug stats functionality
 document.getElementById('debug-stats-btn').addEventListener('click', () => {
   window.location.href = '/ui/debug-stats.html';
+});
+
+// Configuration functionality
+document.getElementById('config-btn').addEventListener('click', () => {
+  window.location.href = '/ui/config.html';
+});
+
+// Backup status functionality
+document.getElementById('backup-btn').addEventListener('click', () => {
+  window.location.href = '/ui/backup-status.html';
 });
 </script>
 </body>

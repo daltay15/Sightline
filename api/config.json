@@ -1,0 +1,22 @@
+{
+  "cache_size": 100,
+  "camera_dir": "/mnt/cameras",
+  "cors_origins": "*",
+  "created_at": 1760169707,
+  "db_backup_enabled": true,
+  "db_backup_interval": "24h",
+  "db_path": "./data/events.db",
+  "detection_classes": "person,car,truck,bus,bicycle,motorcycle,dog,bird",
+  "detection_confidence": 0.45,
+  "gpu_detection_timeout": 30,
+  "gpu_detection_url": "http://localhost:8000",
+  "max_workers": 8,
+  "rate_limit_enabled": false,
+  "rate_limit_requests": 100,
+  "rate_limit_window": "1m",
+  "server_host": "0.0.0.0",
+  "server_port": 8080,
+  "thumbnail_quality": 85,
+  "thumbnail_size": 320,
+  "updated_at": 1760169707
+}
