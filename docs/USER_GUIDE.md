@@ -74,13 +74,21 @@
 - **Database Status**: Database health and performance
 - **File Processing**: Queue status and processing rates
 - **Resource Monitoring**: CPU, RAM, and disk usage
+- **Detection Processing**: AI detection pipeline monitoring
 - **Health Notifications**: Automatic alerts for issues
 
 **How to Use**:
 1. Monitor system health indicators
 2. Check for any red warning indicators
 3. Review processing queue status
-4. Use refresh button to update all data
+4. Monitor detection processing pipeline
+5. Use refresh button to update all data
+
+**New Detection Features**:
+- **Detection Pipeline Status**: Monitor AI detection processing
+- **Real-time Updates**: Track detection processing progress
+- **Debug Tools**: Comprehensive detection debugging
+- **Manual Processing**: Trigger detection processing manually
 
 ### About
 **Purpose**: System information and maintenance tools
@@ -154,6 +162,36 @@
 - **Optimized Loading**: Faster page loads on mobile
 - **Efficient Scrolling**: Smooth scrolling through large lists
 - **Battery Friendly**: Optimized for mobile devices
+
+## Advanced Detection Features
+
+### Real-time Detection Updates
+
+**Automatic Refresh**:
+- **Live Updates**: New detections appear automatically in the UI
+- **Smart Monitoring**: Tracks detection processing pipeline
+- **Status Indicators**: Visual feedback for processing status
+- **Background Processing**: Detections processed without user intervention
+
+**Detection Pipeline Monitoring**:
+- **Processing Status**: Monitor AI detection processing in real-time
+- **Queue Management**: Track pending and completed detections
+- **Performance Metrics**: Monitor processing rates and efficiency
+- **Error Handling**: Automatic error detection and recovery
+
+### Debug and Troubleshooting
+
+**Enhanced Debug Tools**:
+- **Detection Status**: Comprehensive detection processing information
+- **Pipeline Monitoring**: Track detection processing pipeline
+- **Manual Processing**: Trigger detection processing manually
+- **Performance Metrics**: Detailed processing statistics
+
+**Troubleshooting Features**:
+- **Status Monitoring**: Real-time detection processing status
+- **Error Detection**: Automatic error identification
+- **Recovery Tools**: Manual processing triggers
+- **Performance Analysis**: Detailed processing metrics
 
 ## Tips and Best Practices
 

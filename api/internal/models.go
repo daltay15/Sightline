@@ -1,20 +1,24 @@
 package internal
 
 type Event struct {
-	ID               int64             `db:"id" json:"id"`
-	Camera           string            `db:"camera" json:"camera"`
-	Path             string            `db:"path" json:"path"`
-	JpgPath          *string           `db:"jpg_path" json:"jpgPath,omitempty"`
-	SheetPath        *string           `db:"sheet_path" json:"sheetPath,omitempty"`
-	StartTS          int64             `db:"start_ts" json:"startTs"`
-	DurationMS       int64             `db:"duration_ms" json:"durationMs"`
-	SizeBytes        int64             `db:"size_bytes" json:"sizeBytes"`
-	Reviewed         int               `db:"reviewed" json:"reviewed"`
-	Tags             string            `db:"tags" json:"tags"`
-	CreatedAt        int64             `db:"created_at" json:"createdAt"`
-	DetectionData    *string           `db:"detection_data" json:"detectionData,omitempty"`
-	DetectionUpdated int64             `db:"detection_updated" json:"detectionUpdated"`
-	Detections       []DetectionResult `json:"detections,omitempty"`
+	ID                 int64             `db:"id" json:"id"`
+	Camera             string            `db:"camera" json:"camera"`
+	Path               string            `db:"path" json:"path"`
+	JpgPath            *string           `db:"jpg_path" json:"jpgPath,omitempty"`
+	SheetPath          *string           `db:"sheet_path" json:"sheetPath,omitempty"`
+	StartTS            int64             `db:"start_ts" json:"startTs"`
+	DurationMS         int64             `db:"duration_ms" json:"durationMs"`
+	SizeBytes          int64             `db:"size_bytes" json:"sizeBytes"`
+	Reviewed           int               `db:"reviewed" json:"reviewed"`
+	Tags               string            `db:"tags" json:"tags"`
+	CreatedAt          int64             `db:"created_at" json:"createdAt"`
+	DetectionData      *string           `db:"detection_data" json:"detectionData,omitempty"`
+	DetectionUpdated   int64             `db:"detection_updated" json:"detectionUpdated"`
+	OriginalEventID    *int64            `db:"original_event_id" json:"originalEventId,omitempty"`
+	DetectionImagePath *string           `db:"detection_image_path" json:"detectionImagePath,omitempty"`
+	VideoPath          *string           `db:"video_path" json:"videoPath,omitempty"`
+	DetectionPath      *string           `db:"detection_path" json:"detectionPath,omitempty"`
+	Detections         []DetectionResult `json:"detections,omitempty"`
 }
 
 type EventsResp struct {

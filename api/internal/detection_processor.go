@@ -131,6 +131,13 @@ func (dp *DetectionProcessor) ProcessCompletedFiles() error {
 	})
 
 	dp.logger.Printf("=== DetectionProcessor: Scan complete - Found %d JSON files, processed %d, errors %d", jsonFileCount, processedCount, errorCount)
+
+	// Log recent detection updates for debugging
+	if processedCount > 0 {
+		var recentUpdates int64
+		_ = dp.db.QueryRow("SELECT COUNT(*) FROM events WHERE detection_updated > ?", time.Now().Unix()-60).Scan(&recentUpdates)
+		dp.logger.Printf("=== DetectionProcessor: Recent detection updates in last minute: %d", recentUpdates)
+	}
 	return err
 }
 
@@ -179,14 +186,21 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 	// Update the event record with retry logic for database locks
 	updateQuery := `
 		UPDATE events 
-		SET detection_data = ?, detection_updated = ?
+		SET detection_data = ?, detection_updated = ?, detection_path = ?
 		WHERE id = ?
 	`
+
+	// Get the detection image path from the detection file
+	detectionImagePath := detectionFile.AnnotatedImage
+	if detectionImagePath == "" {
+		// Fallback: construct path from the JSON file path
+		detectionImagePath = strings.TrimSuffix(jsonPath, ".json") + ".jpg"
+	}
 
 	// Retry logic for database locks
 	maxRetries := 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		_, err = dp.db.Exec(updateQuery, string(detectionJSON), time.Now().Unix(), eventID)
+		_, err = dp.db.Exec(updateQuery, string(detectionJSON), time.Now().Unix(), detectionImagePath, eventID)
 		if err == nil {
 			break // Success
 		}
