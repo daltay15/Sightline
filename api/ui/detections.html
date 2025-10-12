@@ -1900,14 +1900,82 @@ document.addEventListener('DOMContentLoaded', function() {
   if (floatingDate && floatingDateText) {
     let scrollTimeout;
     window.addEventListener('scroll', function() {
-      // Show floating date
-      const currentDate = new Date().toLocaleDateString('en-US', {
+      // Find the date of events currently visible on screen
+      const cards = document.querySelectorAll('.card');
+      let visibleDate = null;
+      
+      // Get the viewport bounds
+      const viewportTop = window.scrollY;
+      const viewportBottom = viewportTop + window.innerHeight;
+      
+      // Find the first visible card and get its date
+      for (const card of cards) {
+        const rect = card.getBoundingClientRect();
+        const cardTop = rect.top + window.scrollY;
+        const cardBottom = cardTop + rect.height;
+        
+        // Check if this card is visible in the viewport
+        if (cardBottom > viewportTop && cardTop < viewportBottom) {
+          const tsElement = card.querySelector('.ts');
+          if (tsElement) {
+            // Extract timestamp from the displayed text or use a data attribute
+            const tsText = tsElement.textContent;
+            // Try to parse the timestamp from the displayed text
+            // Handle different formats:
+            // Desktop: "MM/DD/YYYY HH:MM:SS AM/PM CT"
+            // Mobile: "MM/DD/YY HH:MM AM/PM" 
+            // Ultra Mobile: "MM/DD HH:MM AM/PM"
+            let dateMatch = tsText.match(/(\d{2}\/\d{2}\/\d{4})/); // Desktop format
+            if (!dateMatch) {
+              dateMatch = tsText.match(/(\d{2}\/\d{2}\/\d{2})/); // Mobile format
+            }
+            if (!dateMatch) {
+              dateMatch = tsText.match(/(\d{2}\/\d{2})/); // Ultra mobile format
+            }
+            
+            if (dateMatch) {
+              const dateStr = dateMatch[1];
+              const parts = dateStr.split('/');
+              const month = parts[0];
+              const day = parts[1];
+              let year = parts[2];
+              
+              // Handle 2-digit years (mobile format)
+              if (year && year.length === 2) {
+                const currentYear = new Date().getFullYear();
+                const currentCentury = Math.floor(currentYear / 100) * 100;
+                const yearNum = parseInt(year);
+                // Assume years 00-30 are 2000s, 31-99 are 1900s
+                year = yearNum <= 30 ? (currentCentury + yearNum) : (currentCentury - 100 + yearNum);
+              }
+              
+              // Handle ultra mobile format (no year)
+              if (!year) {
+                year = new Date().getFullYear();
+              }
+              
+              const eventDate = new Date(year, month - 1, day);
+              visibleDate = eventDate.toLocaleDateString('en-US', {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
+              });
+              break;
+            }
+          }
+        }
+      }
+      
+      // If we found a visible date, show it; otherwise show current date as fallback
+      const displayDate = visibleDate || new Date().toLocaleDateString('en-US', {
         weekday: 'short',
         month: 'short',
         day: 'numeric',
         year: 'numeric'
       });
-      floatingDateText.textContent = currentDate;
+      
+      floatingDateText.textContent = displayDate;
       floatingDate.classList.add('visible');
       
       // Hide floating date after scrolling stops
