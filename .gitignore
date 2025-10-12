@@ -28,6 +28,7 @@ go.work.sum
 *.db-shm
 /api/data
 api/scui-api
+api/api
 /gpu-detection-python/test/.venv
 *.pt
 *.jpg
