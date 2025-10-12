@@ -1,4 +1,4 @@
-# Security Camera UI
+# Sightline
 
 A comprehensive security camera management system with AI-powered object detection, real-time monitoring, and intelligent file organization.
 
