@@ -1210,41 +1210,119 @@ func Routes(r *gin.Engine, db *sql.DB) {
 		where = append(where, "e.size_bytes>=?")
 		args = append(args, minSize)
 
-		// Add detection filters
+		// Check if we have detection filters
+		hasDetectionFilters := false
 		if detectionType != "" {
-			where = append(where, "EXISTS (SELECT 1 FROM detections d WHERE d.event_id = e.id AND d.detection_type = ?)")
-			args = append(args, detectionType)
+			hasDetectionFilters = true
 		}
-
-		minConfidence, _ := strconv.ParseFloat(minConfidenceStr, 64)
-		if minConfidence > 0 {
-			where = append(where, "EXISTS (SELECT 1 FROM detections d WHERE d.event_id = e.id AND d.confidence >= ?)")
-			args = append(args, minConfidence)
+		if minConfidenceStr != "" {
+			minConfidence, _ := strconv.ParseFloat(minConfidenceStr, 64)
+			if minConfidence > 0 {
+				hasDetectionFilters = true
+			}
 		}
 
 		whereSQL := strings.Join(where, " AND ")
 
-		// Get total count
+		// Get total count - use different query based on whether we have detection filters
 		var total int64
+		var countQuery string
 		countArgs := append([]any{}, args...)
-		if err := db.QueryRow("SELECT COUNT(*) FROM events e WHERE "+whereSQL+" AND e.camera != 'DETECTION' AND (e.path LIKE '%.jpg' OR e.path LIKE '%.jpeg')", countArgs...).Scan(&total); err != nil {
+
+		if hasDetectionFilters {
+			// Use JOIN for detection filters
+			detectionWhere := []string{}
+			if detectionType != "" {
+				detectionWhere = append(detectionWhere, "d.detection_type = ?")
+				countArgs = append(countArgs, detectionType)
+			}
+			if minConfidenceStr != "" {
+				minConfidence, _ := strconv.ParseFloat(minConfidenceStr, 64)
+				if minConfidence > 0 {
+					detectionWhere = append(detectionWhere, "d.confidence >= ?")
+					countArgs = append(countArgs, minConfidence)
+				}
+			}
+
+			detectionWhereSQL := ""
+			if len(detectionWhere) > 0 {
+				detectionWhereSQL = " AND " + strings.Join(detectionWhere, " AND ")
+			}
+
+			countQuery = `
+				SELECT COUNT(DISTINCT e.id) 
+				FROM events e 
+				INNER JOIN detections d ON d.event_id = e.id 
+				WHERE ` + whereSQL + ` 
+				AND e.camera != 'DETECTION' 
+				AND (e.path LIKE '%.jpg' OR e.path LIKE '%.jpeg')` + detectionWhereSQL
+		} else {
+			// Simple query without detection filters
+			countQuery = "SELECT COUNT(*) FROM events e WHERE " + whereSQL + " AND e.camera != 'DETECTION' AND (e.path LIKE '%.jpg' OR e.path LIKE '%.jpeg')"
+		}
+
+		if err := db.QueryRow(countQuery, countArgs...).Scan(&total); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
 		// Get base image events with their metadata
-		pageArgs := append([]any{}, args...)
-		pageArgs = append(pageArgs, limit, offset)
+		var q string
+		var pageArgs []any
 
-		q := `
-			SELECT e.id, e.camera, e.path, e.jpg_path, e.sheet_path, e.start_ts, e.duration_ms, e.size_bytes, e.reviewed, e.tags, e.created_at, e.detection_data, e.detection_updated, e.video_path, e.detection_path
-			FROM events e
-			WHERE ` + whereSQL + `
-			AND e.camera != 'DETECTION'
-			AND (e.path LIKE '%.jpg' OR e.path LIKE '%.jpeg')
-			ORDER BY e.start_ts DESC
-			LIMIT ? OFFSET ?
-		`
+		if hasDetectionFilters {
+			// Use JOIN for detection filters
+			detectionWhere := []string{}
+			detectionArgs := []any{}
+
+			if detectionType != "" {
+				detectionWhere = append(detectionWhere, "d.detection_type = ?")
+				detectionArgs = append(detectionArgs, detectionType)
+			}
+			if minConfidenceStr != "" {
+				minConfidence, _ := strconv.ParseFloat(minConfidenceStr, 64)
+				if minConfidence > 0 {
+					detectionWhere = append(detectionWhere, "d.confidence >= ?")
+					detectionArgs = append(detectionArgs, minConfidence)
+				}
+			}
+
+			detectionWhereSQL := ""
+			if len(detectionWhere) > 0 {
+				detectionWhereSQL = " AND " + strings.Join(detectionWhere, " AND ")
+			}
+
+			// Build args in correct order: base args + detection args + limit/offset
+			pageArgs = append([]any{}, args...)
+			pageArgs = append(pageArgs, detectionArgs...)
+			pageArgs = append(pageArgs, limit, offset)
+
+			q = `
+				SELECT DISTINCT e.id, e.camera, e.path, e.jpg_path, e.sheet_path, e.start_ts, e.duration_ms, e.size_bytes, e.reviewed, e.tags, e.created_at, e.detection_data, e.detection_updated, e.video_path, e.detection_path
+				FROM events e
+				INNER JOIN detections d ON d.event_id = e.id
+				WHERE ` + whereSQL + `
+				AND e.camera != 'DETECTION'
+				AND (e.path LIKE '%.jpg' OR e.path LIKE '%.jpeg')` + detectionWhereSQL + `
+				ORDER BY e.start_ts DESC
+				LIMIT ? OFFSET ?
+			`
+		} else {
+			// Simple query without detection filters
+			pageArgs = append([]any{}, args...)
+			pageArgs = append(pageArgs, limit, offset)
+
+			q = `
+				SELECT e.id, e.camera, e.path, e.jpg_path, e.sheet_path, e.start_ts, e.duration_ms, e.size_bytes, e.reviewed, e.tags, e.created_at, e.detection_data, e.detection_updated, e.video_path, e.detection_path
+				FROM events e
+				WHERE ` + whereSQL + `
+				AND e.camera != 'DETECTION'
+				AND (e.path LIKE '%.jpg' OR e.path LIKE '%.jpeg')
+				ORDER BY e.start_ts DESC
+				LIMIT ? OFFSET ?
+			`
+		}
+
 		rows, err := db.Query(q, pageArgs...)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1253,6 +1331,9 @@ func Routes(r *gin.Engine, db *sql.DB) {
 		defer rows.Close()
 
 		items := make([]map[string]any, 0, limit)
+		eventIDs := make([]int64, 0, limit)
+
+		// First pass: collect all events and their IDs
 		for rows.Next() {
 			var id, camera, path string
 			var jpg, sheet, detectionData *string
@@ -1298,14 +1379,36 @@ func Routes(r *gin.Engine, db *sql.DB) {
 				e["detectionPath"] = *detectionPath
 			}
 
-			// Get detections for this event
+			// Collect event ID for bulk detection query
 			eventIDInt, _ := strconv.ParseInt(id, 10, 64)
-			detections, err := detectionProcessor.GetDetectionsForEvent(eventIDInt)
-			if err == nil {
-				e["detections"] = detections
-			}
+			eventIDs = append(eventIDs, eventIDInt)
 
 			items = append(items, e)
+		}
+
+		// Bulk fetch all detections for all events in a single query
+		detectionsByEvent, err := detectionProcessor.GetDetectionsForEvents(eventIDs)
+		if err != nil {
+			// If bulk query fails, fall back to individual queries
+			for i, e := range items {
+				eventIDInt, _ := strconv.ParseInt(e["id"].(string), 10, 64)
+				detections, err := detectionProcessor.GetDetectionsForEvent(eventIDInt)
+				if err == nil {
+					e["detections"] = detections
+				}
+				items[i] = e
+			}
+		} else {
+			// Add detections to each event
+			for i, e := range items {
+				eventIDInt, _ := strconv.ParseInt(e["id"].(string), 10, 64)
+				if detections, exists := detectionsByEvent[eventIDInt]; exists {
+					e["detections"] = detections
+				} else {
+					e["detections"] = []any{} // Empty array if no detections
+				}
+				items[i] = e
+			}
 		}
 
 		nextOffset := offset + len(items)
