@@ -316,9 +316,10 @@
     .detection-badge.bird{background:rgba(68,255,255,0.8);color:#000;}
     .detection-badge.dog{background:rgba(255,165,0,0.8);color:#000;}
     .empty{opacity:.6;text-align:center;padding:40px 0}
-    .fullscreen{position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:1000;display:none;align-items:center;justify-content:center;cursor:pointer}
-    .fullscreen img{max-width:100%;max-height:100%;object-fit:contain;transition:opacity 0.3s;cursor:pointer}
+    .fullscreen{position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:1000;display:none;align-items:center;justify-content:center;cursor:pointer;touch-action:none}
+    .fullscreen img{max-width:100%;max-height:100%;object-fit:contain;transition:opacity 0.3s, transform 0.3s;cursor:pointer;transform-origin:center center;touch-action:none}
     .fullscreen img:hover{opacity:0.9}
+    .fullscreen img.zoomed{transition:transform 0.2s ease-out}
     .fullscreen-close{position:absolute;top:20px;right:20px;background:rgba(0,0,0,0.7);color:white;border:none;padding:10px 15px;border-radius:5px;cursor:pointer;font-size:16px;z-index:1001}
     .fullscreen-loading{color:white;font-size:18px;opacity:0.8}
     .status{background:#1a1d29;border:1px solid #2a2f3a;border-radius:8px;padding:8px 12px;font-size:12px;opacity:.8}
@@ -1062,6 +1063,165 @@ let debounceTimer;
 let showDetectionImagesOnly = true;
 let currentlyPlayingVideo = null;
 
+// Pinch-to-zoom and pan variables
+let zoomState = {
+  scale: 1,
+  lastScale: 1,
+  initialDistance: 0,
+  isZooming: false,
+  lastTouchTime: 0,
+  // Panning variables
+  translateX: 0,
+  translateY: 0,
+  lastTranslateX: 0,
+  lastTranslateY: 0,
+  isPanning: false,
+  lastPanX: 0,
+  lastPanY: 0
+};
+
+// Function to update the total count of events with detections
+async function updateDetectionTotal() {
+  try {
+    // Fetch a larger sample to estimate the total count of events with detections
+    const sampleParams = {...paging.params, limit: 1000, offset: 0};
+    const sampleData = await fetchEvents(sampleParams);
+    const sampleItems = sampleData.items || [];
+    
+    // Count how many have detections in this sample
+    const detectionCount = sampleItems.filter(e => e.detections && e.detections.length > 0).length;
+    
+    if (sampleItems.length > 0) {
+      // Calculate estimated total based on the ratio of detections in the sample
+      const detectionRatio = detectionCount / sampleItems.length;
+      const estimatedTotal = Math.round(sampleData.total * detectionRatio);
+      paging.total = Math.max(detectionCount, estimatedTotal);
+    } else {
+      paging.total = detectionCount;
+    }
+  } catch (error) {
+    console.error('Error updating detection total:', error);
+    // Fallback to a reasonable estimate
+    paging.total = 100;
+  }
+}
+
+// Touch event handlers for pinch-to-zoom
+function getDistance(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function handleTouchStart(e) {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    zoomState.isZooming = true;
+    zoomState.isPanning = false;
+    zoomState.initialDistance = getDistance(e.touches);
+    zoomState.lastScale = zoomState.scale;
+    fullscreenImg.classList.add('zoomed');
+  } else if (e.touches.length === 1) {
+    // Single touch - check for tap or start panning
+    zoomState.lastTouchTime = Date.now();
+    if (zoomState.scale > 1.1) {
+      // If zoomed, start panning
+      zoomState.isPanning = true;
+      zoomState.lastPanX = e.touches[0].clientX;
+      zoomState.lastPanY = e.touches[0].clientY;
+      e.preventDefault();
+    }
+  }
+}
+
+function handleTouchMove(e) {
+  if (e.touches.length === 2 && zoomState.isZooming) {
+    e.preventDefault();
+    const currentDistance = getDistance(e.touches);
+    const scale = (currentDistance / zoomState.initialDistance) * zoomState.lastScale;
+    
+    // Limit zoom between 1x and 5x
+    const clampedScale = Math.max(1, Math.min(5, scale));
+    zoomState.scale = clampedScale;
+    
+    updateTransform();
+  } else if (e.touches.length === 1 && zoomState.isPanning && zoomState.scale > 1.1) {
+    e.preventDefault();
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    
+    const deltaX = currentX - zoomState.lastPanX;
+    const deltaY = currentY - zoomState.lastPanY;
+    
+    zoomState.translateX = zoomState.lastTranslateX + deltaX;
+    zoomState.translateY = zoomState.lastTranslateY + deltaY;
+    
+    // Apply pan boundaries
+    applyPanBoundaries();
+    
+    updateTransform();
+  }
+}
+
+function handleTouchEnd(e) {
+  if (e.touches.length === 0) {
+    zoomState.isZooming = false;
+    zoomState.isPanning = false;
+    
+    // Store current pan position for next gesture
+    zoomState.lastTranslateX = zoomState.translateX;
+    zoomState.lastTranslateY = zoomState.translateY;
+    
+    // Check for single tap (not during zoom or pan)
+    const touchDuration = Date.now() - zoomState.lastTouchTime;
+    if (touchDuration < 300 && zoomState.scale <= 1.1) {
+      // Single tap - close fullscreen
+      closeFullscreen();
+    }
+  }
+}
+
+function updateTransform() {
+  const transform = `scale(${zoomState.scale}) translate(${zoomState.translateX}px, ${zoomState.translateY}px)`;
+  fullscreenImg.style.transform = transform;
+}
+
+function applyPanBoundaries() {
+  // Get image and container dimensions
+  const container = fullscreen;
+  const img = fullscreenImg;
+  
+  if (!img.complete) return;
+  
+  const containerRect = container.getBoundingClientRect();
+  const imgRect = img.getBoundingClientRect();
+  
+  // Calculate the scaled image dimensions
+  const scaledWidth = imgRect.width * zoomState.scale;
+  const scaledHeight = imgRect.height * zoomState.scale;
+  
+  // Calculate maximum pan distances
+  const maxPanX = Math.max(0, (scaledWidth - containerRect.width) / 2);
+  const maxPanY = Math.max(0, (scaledHeight - containerRect.height) / 2);
+  
+  // Apply boundaries
+  zoomState.translateX = Math.max(-maxPanX, Math.min(maxPanX, zoomState.translateX));
+  zoomState.translateY = Math.max(-maxPanY, Math.min(maxPanY, zoomState.translateY));
+}
+
+function resetZoom() {
+  zoomState.scale = 1;
+  zoomState.lastScale = 1;
+  zoomState.isZooming = false;
+  zoomState.isPanning = false;
+  zoomState.translateX = 0;
+  zoomState.translateY = 0;
+  zoomState.lastTranslateX = 0;
+  zoomState.lastTranslateY = 0;
+  fullscreenImg.style.transform = 'scale(1) translate(0px, 0px)';
+  fullscreenImg.classList.remove('zoomed');
+}
+
 async function fetchStats() {
   try {
     const res = await fetch('/scan-status');
@@ -1269,6 +1429,11 @@ function openFullscreen(mediaSrc) {
         e.stopPropagation();
         closeFullscreen();
       };
+      
+      // Add touch event listeners for pinch-to-zoom
+      fullscreenImg.addEventListener('touchstart', handleTouchStart, { passive: false });
+      fullscreenImg.addEventListener('touchmove', handleTouchMove, { passive: false });
+      fullscreenImg.addEventListener('touchend', handleTouchEnd, { passive: false });
     };
     
     fullscreenImg.onerror = () => {
@@ -1291,6 +1456,12 @@ function closeFullscreen() {
     fullscreen._currentVideo.remove();
     fullscreen._currentVideo = null;
   }
+  
+  // Remove touch event listeners and reset zoom
+  fullscreenImg.removeEventListener('touchstart', handleTouchStart);
+  fullscreenImg.removeEventListener('touchmove', handleTouchMove);
+  fullscreenImg.removeEventListener('touchend', handleTouchEnd);
+  resetZoom();
   
   document.body.style.overflow = 'auto';
 }
@@ -1801,14 +1972,66 @@ async function loadPage(append=false){
 
   const params = {...paging.params, limit: paging.limit, offset: append ? paging.nextOffset : 0};
   try {
-    const data = await fetchEvents(params);
-    const items = data.items || [];
-    paging.total = data.total ?? 0;
-    paging.offset = data.offset ?? 0;
-    paging.nextOffset = data.nextOffset ?? null;
+    let allFilteredItems = [];
+    let currentOffset = append ? paging.nextOffset : 0;
+    let hasMore = true;
+    const targetPageSize = paging.limit;
+    let lastData = null;
+    
+    // Keep fetching until we have enough filtered items or no more data
+    while (allFilteredItems.length < targetPageSize && hasMore) {
+      const fetchParams = {...paging.params, limit: paging.limit, offset: currentOffset};
+      const data = await fetchEvents(fetchParams);
+      const items = data.items || [];
+      
+      if (items.length === 0) {
+        hasMore = false;
+        break;
+      }
+      
+      // Filter items if showing detection images only
+      let filteredItems = items;
+      if (showDetectionImagesOnly) {
+        filteredItems = items.filter(e => {
+          // Check if event has detections - the API already fetches detections for each event
+          return e.detections && e.detections.length > 0;
+        });
+      }
+      
+      // Only add items up to the target page size
+      const remainingSlots = targetPageSize - allFilteredItems.length;
+      const itemsToAdd = filteredItems.slice(0, remainingSlots);
+      allFilteredItems = allFilteredItems.concat(itemsToAdd);
+      
+      currentOffset += items.length;
+      lastData = data;
+      
+      // Check if we've reached the end of available data
+      if (items.length < paging.limit) {
+        hasMore = false;
+      }
+      
+      // If we've reached our target, break immediately
+      if (allFilteredItems.length >= targetPageSize) {
+        break;
+      }
+    }
+    
+    // Calculate total based on whether we're filtering for detections
+    if (showDetectionImagesOnly) {
+      // For detection filter, we need to get the actual count of events with detections
+      // We'll fetch a larger sample to get a more accurate count
+      await updateDetectionTotal();
+    } else {
+      paging.total = lastData?.total ?? 0;
+    }
+    
+    paging.offset = lastData?.offset ?? 0;
+    paging.nextOffset = hasMore ? currentOffset : null;
 
     if (!append) grid.innerHTML = '';
-    if (!items.length && !append) { 
+    
+    if (!allFilteredItems.length && !append) { 
       empty.style.display='block'; 
       count.textContent='0 shown'; 
       showStatus('No detection images found.', 'loading');
@@ -1818,14 +2041,28 @@ async function loadPage(append=false){
     }
 
     const frag = document.createDocumentFragment();
-    for (const e of items) {
+    for (const e of allFilteredItems) {
       const cardElement = await card(e);
       frag.appendChild(cardElement);
     }
     grid.appendChild(frag);
 
-    const shown = (data.offset||0) + items.length;
-    count.textContent = `${shown} / ${paging.total} shown`;
+    // Calculate cumulative count based on whether we're appending or starting fresh
+    let shown;
+    if (append) {
+      // When appending, we need to get the current count from the grid and add new items
+      const currentGridItems = grid.children.length;
+      shown = currentGridItems + allFilteredItems.length;
+    } else {
+      // When starting fresh, just use the current batch
+      shown = allFilteredItems.length;
+    }
+    
+    if (showDetectionImagesOnly) {
+      count.textContent = `${shown} / ${paging.total} detection images shown`;
+    } else {
+      count.textContent = `${shown} / ${paging.total} shown`;
+    }
     
     if (!append) {
       hideStatus();
@@ -1867,9 +2104,11 @@ function applyFilters(){
     }
   }
 
-  // If showing detection images only, filter for events that have detections
-  if (showDetectionImagesOnly) {
-    p.detectionType = 'any'; // This will filter for events with any detections
+  // If showing detection images only, we still need to apply detection type filters
+  // The API supports detection type filtering, so we can pass it through
+  if (showDetectionImagesOnly && detectionType) {
+    // Keep the detectionType filter - the API will handle it
+    // This ensures the filter dropdown works properly
   }
 
   paging.params = p;
@@ -1885,6 +2124,9 @@ document.getElementById('reset').onclick = ()=>{
   populateCameraDropdown(); // Refresh camera dropdown
   loadPage(false);
 };
+
+// Auto-apply filter when detection type changes
+document.getElementById('detectionType').addEventListener('change', applyFilters);
 document.getElementById('refresh').onclick = ()=>{
   loadPage(false);
 };

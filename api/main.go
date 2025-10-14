@@ -152,6 +152,8 @@ func main() {
 	indexSQL := `
 		CREATE INDEX IF NOT EXISTS idx_events_reviewed ON events(reviewed);
 		CREATE INDEX IF NOT EXISTS idx_events_detection_updated ON events(detection_updated);
+		CREATE INDEX IF NOT EXISTS idx_events_path ON events(path);
+		CREATE INDEX IF NOT EXISTS idx_events_camera_path ON events(camera, path);
 	`
 	if _, err := db.Exec(indexSQL); err != nil {
 		log.Printf("Warning: Failed to create detection indexes: %v", err)

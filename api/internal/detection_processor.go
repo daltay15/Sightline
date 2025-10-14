@@ -368,6 +368,46 @@ func (dp *DetectionProcessor) GetDetectionsForEvent(eventID int64) ([]DetectionR
 	return detections, nil
 }
 
+// GetDetectionsForEvents retrieves all detections for multiple events in a single query
+func (dp *DetectionProcessor) GetDetectionsForEvents(eventIDs []int64) (map[int64][]DetectionResult, error) {
+	if len(eventIDs) == 0 {
+		return make(map[int64][]DetectionResult), nil
+	}
+
+	// Create placeholders for the IN clause
+	placeholders := make([]string, len(eventIDs))
+	args := make([]interface{}, len(eventIDs))
+	for i, id := range eventIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := `
+		SELECT id, event_id, detection_type, confidence, bbox_x, bbox_y, bbox_width, bbox_height, frame_index, timestamp, created_at
+		FROM detections 
+		WHERE event_id IN (` + strings.Join(placeholders, ",") + `)
+		ORDER BY event_id, confidence DESC
+	`
+	rows, err := dp.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Group detections by event ID
+	detectionsByEvent := make(map[int64][]DetectionResult)
+	for rows.Next() {
+		var det DetectionResult
+		err := rows.Scan(&det.ID, &det.EventID, &det.Type, &det.Confidence, &det.BboxX, &det.BboxY, &det.BboxWidth, &det.BboxHeight, &det.FrameIndex, &det.Timestamp, &det.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		detectionsByEvent[det.EventID] = append(detectionsByEvent[det.EventID], det)
+	}
+
+	return detectionsByEvent, nil
+}
+
 // GetDetectionStats retrieves statistics about detections
 func (dp *DetectionProcessor) GetDetectionStats(days int) (*DetectionStats, error) {
 	// Calculate start time
