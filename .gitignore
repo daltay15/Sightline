@@ -35,3 +35,4 @@ Security-Camera-UI/
 node_modules/
 react-ui/dist/
 react-ui/build/
+package-lock.json

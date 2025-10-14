@@ -19,7 +19,9 @@ function Events() {
 
   // Format timestamp
   const formatTimestamp = (timestamp) => {
+    if (!timestamp || isNaN(timestamp)) return 'Invalid Date CT';
     const date = new Date(timestamp * 1000);
+    if (isNaN(date.getTime())) return 'Invalid Date CT';
     return date.toLocaleString('en-US', {
       timeZone: 'America/Chicago',
       year: 'numeric',
@@ -34,6 +36,7 @@ function Events() {
 
   // Format file size
   const formatSize = (bytes) => {
+    if (!bytes || isNaN(bytes)) return '0 MB';
     return (bytes / 1e6).toFixed(1) + ' MB';
   };
 
@@ -41,7 +44,7 @@ function Events() {
   useEffect(() => {
     const loadCameras = async () => {
       try {
-        const res = await fetch('/events/cameras');
+        const res = await fetch('/cameras');
         if (res.ok) {
           const data = await res.json();
           setCameras(data.cameras || []);
@@ -79,10 +82,10 @@ function Events() {
       const data = await res.json();
       
       if (reset) {
-        setEvents(data.events || []);
+        setEvents(data.items || data.events || []);
         setPaging(prev => ({ ...prev, offset: 0, total: data.total || 0 }));
       } else {
-        setEvents(prev => [...prev, ...(data.events || [])]);
+        setEvents(prev => [...prev, ...(data.items || data.events || [])]);
         setPaging(prev => ({ ...prev, offset: prev.offset + paging.limit, total: data.total || 0 }));
       }
     } catch (e) {
@@ -148,52 +151,54 @@ function Events() {
     }
   };
 
+  const controls = (
+    <>
+      <select 
+        value={filters.camera} 
+        onChange={(e) => handleFilterChange('camera', e.target.value)}
+      >
+        <option value="">All Cameras</option>
+        {cameras.map(cam => (
+          <option key={cam.camera} value={cam.camera}>{cam.camera} ({cam.count})</option>
+        ))}
+      </select>
+      
+      <input
+        type="date"
+        value={filters.from}
+        onChange={(e) => handleFilterChange('from', e.target.value)}
+        placeholder="From"
+      />
+      
+      <input
+        type="date"
+        value={filters.to}
+        onChange={(e) => handleFilterChange('to', e.target.value)}
+        placeholder="To"
+      />
+      
+      <button className="primary" onClick={handleApply}>Apply</button>
+      <button onClick={handleReset}>Reset</button>
+      <button onClick={() => loadEvents(true)}>Refresh</button>
+    </>
+  );
+
+  const dateShortcuts = (
+    <div className="date-shortcuts">
+      <button onClick={() => setDateRange('today')}>Today</button>
+      <button onClick={() => setDateRange('yesterday')}>Yesterday</button>
+      <button onClick={() => setDateRange('week')}>This Week</button>
+      <button onClick={() => setDateRange('month')}>This Month</button>
+      <button onClick={() => setDateRange('all')}>All Time</button>
+    </div>
+  );
+
   return (
     <div className="events-page">
-      <Header title="Camera Events" />
+      <Header title="Camera Events" controls={controls} />
       
       <main>
-        <div className="controls">
-          <select 
-            value={filters.camera} 
-            onChange={(e) => handleFilterChange('camera', e.target.value)}
-          >
-            <option value="">All Cameras</option>
-            {cameras.map(cam => (
-              <option key={cam} value={cam}>{cam}</option>
-            ))}
-          </select>
-          
-          <input
-            type="date"
-            value={filters.from}
-            onChange={(e) => handleFilterChange('from', e.target.value)}
-            placeholder="From"
-          />
-          
-          <input
-            type="date"
-            value={filters.to}
-            onChange={(e) => handleFilterChange('to', e.target.value)}
-            placeholder="To"
-          />
-          
-          <button className="primary" onClick={handleApply}>Apply</button>
-          <button onClick={handleReset}>Reset</button>
-          <button onClick={() => loadEvents(true)}>Refresh</button>
-        </div>
-        
-        <div className="date-shortcuts">
-          <button onClick={() => setDateRange('today')}>Today</button>
-          <button onClick={() => setDateRange('yesterday')}>Yesterday</button>
-          <button onClick={() => setDateRange('week')}>This Week</button>
-          <button onClick={() => setDateRange('month')}>This Month</button>
-          <button onClick={() => setDateRange('all')}>All Time</button>
-        </div>
-        
-        <div className="count">
-          {loading ? 'Loading...' : `Showing ${events.length} of ${paging.total} events`}
-        </div>
+        {dateShortcuts}
         
         <div className="grid">
           {events.map(event => (

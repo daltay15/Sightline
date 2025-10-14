@@ -373,8 +373,6 @@ func Routes(r *gin.Engine, db *sql.DB) {
 
 		// Check if file actually exists
 		if _, err := os.Stat(detectionPath); os.IsNotExist(err) {
-			// Log the attempted path for debugging
-			fmt.Printf("Detection image not found: %s\n", detectionPath)
 			c.Status(http.StatusNotFound)
 			return
 		}
