@@ -233,6 +233,61 @@ func ScanDetectionImages(db *sql.DB, cfg Config) error {
 	return nil
 }
 
+// ForceReindexHouseFiles forces reindexing of all files in the House camera directory
+func ForceReindexHouseFiles(db *sql.DB, cfg Config) error {
+	log.Printf("ForceReindexHouseFiles: Starting forced reindex of House camera files")
+	
+	// Define the House camera directory path
+	houseDir := filepath.Join(cfg.Root, "House")
+	
+	// Check if House directory exists
+	if _, err := os.Stat(houseDir); os.IsNotExist(err) {
+		log.Printf("ForceReindexHouseFiles: House directory does not exist: %s", houseDir)
+		return nil
+	}
+	
+	// First, remove all existing House camera events from database
+	log.Printf("ForceReindexHouseFiles: Removing existing House camera events from database")
+	_, err := db.Exec("DELETE FROM events WHERE camera = 'House'")
+	if err != nil {
+		log.Printf("ForceReindexHouseFiles: Error removing existing House events: %v", err)
+		return err
+	}
+	
+	// Now reindex all files in the House directory
+	log.Printf("ForceReindexHouseFiles: Reindexing all files in %s", houseDir)
+	
+	var houseFiles []string
+	err = filepath.WalkDir(houseDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		lower := strings.ToLower(p)
+		if strings.HasSuffix(lower, ".mp4") || strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") {
+			houseFiles = append(houseFiles, p)
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("ForceReindexHouseFiles: Error walking House directory: %v", err)
+		return err
+	}
+	
+	log.Printf("ForceReindexHouseFiles: Found %d files to reindex", len(houseFiles))
+	
+	// Process each file
+	for _, file := range houseFiles {
+		log.Printf("ForceReindexHouseFiles: Reindexing %s", file)
+		if err := indexFile(db, cfg, file); err != nil {
+			log.Printf("ForceReindexHouseFiles: Error reindexing file %s: %v", file, err)
+			// Continue processing other files
+		}
+	}
+	
+	log.Printf("ForceReindexHouseFiles: Completed reindexing %d House camera files", len(houseFiles))
+	return nil
+}
+
 // ProcessSingleFile processes a single file immediately (for file watcher)
 func ProcessSingleFile(db *sql.DB, cfg Config, filePath string) error {
 	log.Printf("ProcessSingleFile: Processing %s", filePath)
