@@ -822,6 +822,30 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 		})
 	})
 
+	// Test endpoint to force reindex House camera files
+	r.POST("/test/reindex-house", func(c *gin.Context) {
+		fmt.Printf("Manual House camera reindexing triggered\n")
+
+		cfg := indexer.Config{
+			Root: config.CameraDir,
+		}
+
+		if err := indexer.ForceReindexHouseFiles(db, cfg); err != nil {
+			fmt.Printf("Manual House reindexing error: %v\n", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		var count int64
+		_ = db.QueryRow("SELECT COUNT(*) FROM events WHERE camera = 'House'").Scan(&count)
+		fmt.Printf("Manual House reindexing completed, House events: %d\n", count)
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":     "House camera reindexing completed",
+			"houseEvents": count,
+		})
+	})
+
 	// Enhanced events endpoint with detection data
 	r.GET("/events/enhanced", func(c *gin.Context) {
 		camera := c.Query("camera")
