@@ -1,7 +1,6 @@
 package indexer
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -9,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,6 +18,7 @@ import (
 	// optional if you want EXIF/audio tags later
 	"github.com/daltay15/security-camera-ui/api/config"
 	"github.com/daltay15/security-camera-ui/api/internal"
+	"github.com/daltay15/security-camera-ui/api/internal/telegram"
 )
 
 type Config struct {
@@ -801,8 +800,17 @@ type TelegramDetection struct {
 
 // sendTelegramNotificationIfPersonDetected checks for person detections and sends notification
 func sendTelegramNotificationIfPersonDetected(db *sql.DB, cfg Config, jsonPath, imagePath string, eventID int64) error {
+	// Check if Telegram URL is configured
 	if cfg.TelegramURL == "" {
-		return nil // No Telegram URL configured
+		// Check if Telegram should be configured by looking at the main config
+		configManager := internal.NewConfigManager("config.json")
+		if err := configManager.LoadConfig(); err == nil {
+			if telegramEnabled := configManager.GetBool("telegram_enabled", false); telegramEnabled {
+				log.Printf("Warning: Telegram is enabled in config but TelegramURL is not set in indexer config")
+			}
+		}
+		// Telegram not configured, skip notification
+		return nil
 	}
 
 	// Read and parse the JSON file
@@ -845,8 +853,8 @@ func sendTelegramNotificationIfPersonDetected(db *sql.DB, cfg Config, jsonPath, 
 		cameraName = "Unknown Camera" // Fallback
 	}
 
-	// Create formatted message
-	message := fmt.Sprintf("🚨 A person was detected at %s", cameraName)
+	// Create formatted message in old style
+	message := fmt.Sprintf("A person was detected at %s", cameraName)
 
 	// Add detection details
 	if len(detectionFile.Detections) > 0 {
@@ -904,44 +912,73 @@ func sendTelegramNotificationIfPersonDetected(db *sql.DB, cfg Config, jsonPath, 
 		"annotated_image": detectionFile.AnnotatedImage,
 	}
 
-	// Create the payload
-	payload := TelegramPayload{
-		CameraName:         cameraName,
-		Timestamp:          time.Now().Unix(),
-		Detections:         telegramDetections,
-		DurationMs:         detectionFile.DurationMs,
-		Imgsz:              detectionFile.Imgsz,
-		Conf:               detectionFile.Conf,
-		Iou:                detectionFile.Iou,
-		DetectionJson:      detectionJson,
-		DetectionJsonName:  fmt.Sprintf("detection_%d.json", eventID),
-		Chat:               "security_group",
-		Message:            message,
-		AnnotatedImagePath: imagePath,
-		AnnotatedImageB64:  imageB64,
-		AnnotatedImageName: imageName,
+	// Create the payload for local Telegram client
+	payload := map[string]interface{}{
+		"camera_name":         cameraName,
+		"timestamp":           time.Now().Unix(),
+		"detections":          convertToTelegramDetections(detectionFile.Detections),
+		"duration_ms":         detectionFile.DurationMs,
+		"imgsz":               detectionFile.Imgsz,
+		"conf":                detectionFile.Conf,
+		"iou":                 detectionFile.Iou,
+		"detection_json":      detectionJson,
+		"detection_json_name": fmt.Sprintf("detection_%d.json", eventID),
+		"chat":                "security_group",
 	}
 
-	// Convert to JSON
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal Telegram payload: %w", err)
+	// Add image data if available
+	if imageB64 != "" {
+		payload["annotated_image_b64"] = imageB64
+		payload["annotated_image_name"] = imageName
+	} else if imagePath != "" {
+		payload["annotated_image_path"] = imagePath
 	}
 
-	// Send HTTP POST request
-	resp, err := http.Post(cfg.TelegramURL, "application/json", bytes.NewBuffer(jsonData))
+	// Send using direct Telegram client (same as test button)
+	configManager := internal.NewConfigManager("config.json")
+	if err := configManager.LoadConfig(); err != nil {
+		log.Printf("Failed to load config for Telegram: %v", err)
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	telegramClient, err := telegram.NewTelegramClient(configManager.GetConfig())
 	if err != nil {
+		log.Printf("Failed to create Telegram client: %v", err)
+		return fmt.Errorf("failed to create Telegram client: %w", err)
+	}
+
+	log.Printf("Sending Telegram notification directly using Telegram client")
+
+	if err := telegramClient.SendDetection(payload, "security_group"); err != nil {
+		log.Printf("Failed to send Telegram notification: %v", err)
 		return fmt.Errorf("failed to send Telegram notification: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("telegram API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	log.Printf("Successfully sent Telegram notification for event %d", eventID)
 	return nil
+}
+
+// convertToTelegramDetections converts DetectionData to the format expected by Telegram client
+func convertToTelegramDetections(detections []DetectionData) []map[string]interface{} {
+	var result []map[string]interface{}
+	for _, det := range detections {
+		telegramDet := map[string]interface{}{
+			"label": det.Label,
+			"score": det.Score,
+		}
+
+		// Add bounding box if available
+		if len(det.Xyxy) >= 4 {
+			x1, y1, x2, y2 := det.Xyxy[0], det.Xyxy[1], det.Xyxy[2], det.Xyxy[3]
+			telegramDet["x"] = int(x1)
+			telegramDet["y"] = int(y1)
+			telegramDet["w"] = int(x2 - x1)
+			telegramDet["h"] = int(y2 - y1)
+		}
+
+		result = append(result, telegramDet)
+	}
+	return result
 }
 
 // DetectionData represents a single detection (matching the structure from detection_processor.go)

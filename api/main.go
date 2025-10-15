@@ -17,6 +17,7 @@ import (
 	"github.com/daltay15/security-camera-ui/api/internal"
 	httpx "github.com/daltay15/security-camera-ui/api/internal/http"
 	"github.com/daltay15/security-camera-ui/api/internal/indexer"
+	"github.com/daltay15/security-camera-ui/api/internal/telegram"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -166,7 +167,7 @@ func main() {
 	r.Use(httpx.CompressionMiddleware())
 
 	// API routes
-	httpx.Routes(r, db)
+	httpx.Routes(r, db, configManager)
 
 	// Serve embedded UI files
 	sub, err := fs.Sub(uiFS, "ui")
@@ -653,6 +654,29 @@ func main() {
 			},
 		}
 
+		// Test Telegram configuration if enabled
+		if telegramEnabled, ok := testConfig["telegram_enabled"].(bool); ok && telegramEnabled {
+			telegramClient, err := telegram.NewTelegramClient(testConfig)
+			if err != nil {
+				results["telegram"] = gin.H{
+					"valid":   false,
+					"error":   err.Error(),
+					"message": "Telegram configuration is invalid",
+				}
+			} else {
+				results["telegram"] = gin.H{
+					"valid":   true,
+					"message": "Telegram configuration is valid",
+					"chats":   len(telegramClient.GetChats()),
+				}
+			}
+		} else {
+			results["telegram"] = gin.H{
+				"valid":   true,
+				"message": "Telegram is disabled",
+			}
+		}
+
 		c.JSON(200, results)
 	})
 
@@ -885,7 +909,7 @@ func main() {
 		}()
 
 		// Wait a bit before starting to avoid initial database contention
-		time.Sleep(5 * time.Second)
+		time.Sleep(1 * time.Second)
 
 		for {
 			if err := indexer.ScanDetectionImages(db, indexer.Config{

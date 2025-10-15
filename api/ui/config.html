@@ -678,6 +678,36 @@
             </div>
         </div>
 
+        <!-- Telegram Configuration -->
+        <div class="config-section">
+            <h2>📱 Telegram Notifications</h2>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="telegramEnabled">Enable Telegram Notifications</label>
+                    <select id="telegramEnabled">
+                        <option value="false">Disabled</option>
+                        <option value="true">Enabled</option>
+                    </select>
+                    <div class="help-text">Enable Telegram notifications for detections and alerts.</div>
+                </div>
+                <div class="config-item">
+                    <label for="telegramToken">Bot Token</label>
+                    <input type="password" id="telegramToken" placeholder="123456789:ABC...">
+                    <div class="help-text">Telegram bot token from @BotFather. This will be stored securely.</div>
+                </div>
+                <div class="config-item">
+                    <label for="telegramDefaultChat">Default Chat ID</label>
+                    <input type="text" id="telegramDefaultChat" placeholder="123456789">
+                    <div class="help-text">Default chat ID for general notifications.</div>
+                </div>
+                <div class="config-item">
+                    <label for="telegramSecurityChat">Security Group Chat ID</label>
+                    <input type="text" id="telegramSecurityChat" placeholder="-1001234567890">
+                    <div class="help-text">Chat ID for security alerts and person detections.</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Security Configuration -->
         <div class="config-section">
             <h2>🔒 Security Settings</h2>
@@ -717,6 +747,10 @@
             <button id="testConfig" class="secondary">
                 <span>🧪</span>
                 Test Configuration
+            </button>
+            <button id="testTelegram" class="secondary">
+                <span>📱</span>
+                Test Telegram
             </button>
             <button id="resetConfig" class="secondary">
                 <span>🔄</span>
@@ -812,6 +846,12 @@
             document.getElementById('rateLimitEnabled').value = config.rate_limit_enabled ? 'true' : 'false';
             document.getElementById('rateLimitRequests').value = config.rate_limit_requests || 100;
             document.getElementById('rateLimitWindow').value = config.rate_limit_window || '1m';
+            
+            // Telegram
+            document.getElementById('telegramEnabled').value = config.telegram_enabled ? 'true' : 'false';
+            document.getElementById('telegramToken').value = config.telegram_token || '';
+            document.getElementById('telegramDefaultChat').value = config.telegram_default_chat || '';
+            document.getElementById('telegramSecurityChat').value = config.telegram_security_chat || '';
         }
         
         // Collect form data
@@ -836,7 +876,11 @@
                 cache_size: parseInt(document.getElementById('cacheSize').value),
                 rate_limit_enabled: document.getElementById('rateLimitEnabled').value === 'true',
                 rate_limit_requests: parseInt(document.getElementById('rateLimitRequests').value),
-                rate_limit_window: document.getElementById('rateLimitWindow').value
+                rate_limit_window: document.getElementById('rateLimitWindow').value,
+                telegram_enabled: document.getElementById('telegramEnabled').value === 'true',
+                telegram_token: document.getElementById('telegramToken').value,
+                telegram_default_chat: document.getElementById('telegramDefaultChat').value,
+                telegram_security_chat: document.getElementById('telegramSecurityChat').value
             };
         }
         
@@ -912,6 +956,40 @@
             } catch (error) {
                 testResults.classList.add('error');
                 testOutput.textContent = 'Error testing configuration: ' + error.message;
+            }
+        });
+        
+        // Test Telegram
+        document.getElementById('testTelegram').addEventListener('click', async function() {
+            const config = collectFormData();
+            const testResults = document.getElementById('testResults');
+            const testOutput = document.getElementById('testOutput');
+            
+            testResults.className = 'test-results show';
+            testOutput.textContent = 'Testing Telegram configuration...';
+            
+            try {
+                const response = await fetch('/telegram/test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    testOutput.textContent = `✅ Telegram test successful!\n\n${JSON.stringify(result, null, 2)}`;
+                    showStatus('Telegram test completed successfully', 'success');
+                } else {
+                    testOutput.textContent = `❌ Telegram test failed:\n\n${JSON.stringify(result, null, 2)}`;
+                    showStatus('Telegram test failed: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                console.error('Error testing Telegram:', error);
+                testOutput.textContent = `❌ Error testing Telegram: ${error.message}`;
+                showStatus('Error testing Telegram: ' + error.message, 'error');
             }
         });
         

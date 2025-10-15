@@ -17,6 +17,10 @@
   "rate_limit_enabled": false,
   "rate_limit_requests": 100,
   "rate_limit_window": "1m",
+  "telegram_enabled": false,
+  "telegram_token": "",
+  "telegram_default_chat": "",
+  "telegram_security_chat": "",
   "created_at": 1700000000,
   "updated_at": 1700000000
 }

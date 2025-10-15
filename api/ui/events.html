@@ -50,6 +50,24 @@
     .date-shortcuts button{background:#2a2f3a;border:1px solid #444;color:#e8e8e8;padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;transition:all 0.2s}
     .date-shortcuts button:hover{background:#375dfb;border-color:#375dfb;color:#fff}
     
+    /* Auto-refresh indicator */
+    .auto-refresh-indicator {
+      display: none;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: #44ff44;
+      opacity: 0.8;
+    }
+    .auto-refresh-indicator.active {
+      display: flex;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.8; }
+      50% { opacity: 1; }
+    }
+    
     /* Button styling for Original/Video toggles */
     .comparison-view{display:flex;gap:4px;align-items:center;margin-top:8px}
     .comparison-view button{background:#2a2f3a;border:1px solid #444;color:#e8e8e8;padding:4px 8px;border-radius:4px;font-size:10px;cursor:pointer;flex:1;text-align:center}
@@ -558,6 +576,10 @@
       <button id="apply" class="primary">Apply</button>
       <button id="reset">Reset</button>
       <button id="refresh">Refresh</button>
+      <div id="autoRefreshIndicator" class="auto-refresh-indicator" title="Auto-refresh active">
+        <span>🔄</span>
+        <span>Auto-refresh</span>
+      </div>
     </div>
     <span id="count"></span>
     <button class="mobile-menu-toggle" id="mobileMenuToggle">
@@ -1492,8 +1514,129 @@ document.getElementById('to').addEventListener('change', populateCameraDropdown)
 populateCameraDropdown();
 loadPage(false);
 
+// Auto-refresh functionality
+function startAutoRefresh() {
+  if (autoRefreshInterval) return; // Already running
+  
+  // Show indicator
+  const indicator = document.getElementById('autoRefreshIndicator');
+  if (indicator) indicator.classList.add('active');
+  
+  autoRefreshInterval = setInterval(async () => {
+    try {
+      // Check for new events without affecting current view
+      const params = {...paging.params, limit: 10, offset: 0};
+      const url = `/events?${new URLSearchParams(params)}`;
+      const response = await fetch(url);
+      
+      if (response.ok) {
+        const data = await response.json();
+        const currentEventCount = data.events?.length || 0;
+        
+        // Only refresh if we have new events
+        if (currentEventCount > lastEventCount) {
+          lastEventCount = currentEventCount;
+          // Smoothly add new events to the top
+          await loadNewEvents();
+        }
+      }
+    } catch (error) {
+      console.log('Auto-refresh check failed:', error);
+    }
+  }, 30000); // Check every 30 seconds
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshInterval) {
+    clearInterval(autoRefreshInterval);
+    autoRefreshInterval = null;
+  }
+  
+  // Hide indicator
+  const indicator = document.getElementById('autoRefreshIndicator');
+  if (indicator) indicator.classList.remove('active');
+}
+
+// Load only new events and add them to the top
+async function loadNewEvents() {
+  try {
+    const params = {...paging.params, limit: 20, offset: 0};
+    const url = `/events?${new URLSearchParams(params)}`;
+    const response = await fetch(url);
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.events && data.events.length > 0) {
+        // Get current event IDs to avoid duplicates
+        const currentIds = new Set();
+        const existingCards = grid.querySelectorAll('.card');
+        existingCards.forEach(card => {
+          const eventId = card.dataset.eventId;
+          if (eventId) currentIds.add(eventId);
+        });
+        
+        // Add only new events
+        const newEvents = data.events.filter(event => !currentIds.has(event.id.toString()));
+        
+        if (newEvents.length > 0) {
+          // Create cards for new events
+          const fragment = document.createDocumentFragment();
+          newEvents.forEach(event => {
+            const card = createEventCard(event);
+            fragment.appendChild(card);
+          });
+          
+          // Insert new events at the top
+          grid.insertBefore(fragment, grid.firstChild);
+          
+          // Update count
+          const currentCount = parseInt(count.textContent) || 0;
+          count.textContent = currentCount + newEvents.length;
+          
+          // Show subtle notification
+          showStatus(`${newEvents.length} new event${newEvents.length > 1 ? 's' : ''} added`, 'success');
+          setTimeout(() => hideStatus(), 3000);
+        }
+      }
+    }
+  } catch (error) {
+    console.log('Failed to load new events:', error);
+  }
+}
+
+// Create event card (extracted from existing code)
+function createEventCard(event) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.dataset.eventId = event.id;
+  
+  const thumb = document.createElement('img');
+  thumb.className = 'thumb';
+  thumb.src = `/thumb/${event.id}`;
+  thumb.alt = `${event.camera} - ${new Date(event.start_ts * 1000).toLocaleString()}`;
+  thumb.loading = 'lazy';
+  
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.innerHTML = `
+    <span class="camera">${event.camera}</span>
+    <span class="ts">${new Date(event.start_ts * 1000).toLocaleString()}</span>
+  `;
+  
+  card.appendChild(thumb);
+  card.appendChild(meta);
+  
+  // Add click handler
+  thumb.addEventListener('click', () => openFullscreen(thumb.src));
+  
+  return card;
+}
+
 // Update video processing status every 15 seconds
 setInterval(updateVideoProcessingStatus, 15000);
+
+// Start auto-refresh on page load
+startAutoRefresh();
 
 // Stop auto-refresh when page is not visible to save resources
 document.addEventListener('visibilitychange', () => {

@@ -16,6 +16,7 @@ import (
 	"github.com/daltay15/security-camera-ui/api/config"
 	"github.com/daltay15/security-camera-ui/api/internal"
 	"github.com/daltay15/security-camera-ui/api/internal/indexer"
+	"github.com/daltay15/security-camera-ui/api/internal/telegram"
 	"github.com/gin-gonic/gin"
 )
 
@@ -78,7 +79,7 @@ func InitPreparedStatements(db *sql.DB) error {
 	return err
 }
 
-func Routes(r *gin.Engine, db *sql.DB) {
+func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 	// Initialize prepared statements for better performance
 	if err := InitPreparedStatements(db); err != nil {
 		panic("Failed to initialize prepared statements: " + err.Error())
@@ -1539,6 +1540,138 @@ func Routes(r *gin.Engine, db *sql.DB) {
 		c.JSON(200, gin.H{
 			"message": "Video metadata update completed",
 			"updated": updated,
+		})
+	})
+
+	// Telegram endpoints - use passed configManager
+
+	telegramClient, err := telegram.NewTelegramClient(configManager.GetConfig())
+	if err != nil {
+		fmt.Printf("Warning: Failed to initialize Telegram client: %v\n", err)
+	}
+
+	// Send message endpoint
+	r.POST("/telegram/send", func(c *gin.Context) {
+		if telegramClient == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Telegram not configured"})
+			return
+		}
+
+		var payload struct {
+			Message string `json:"message"`
+			Chat    string `json:"chat,omitempty"`
+		}
+
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if payload.Message == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing 'message' in request body"})
+			return
+		}
+
+		if err := telegramClient.SendMessage(payload.Message, payload.Chat); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{"status": "success"})
+	})
+
+	// Send detection endpoint
+	r.POST("/telegram/send_detection", func(c *gin.Context) {
+		if telegramClient == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Telegram not configured"})
+			return
+		}
+
+		var payload map[string]interface{}
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		chat := ""
+		if chatVal, ok := payload["chat"].(string); ok {
+			chat = chatVal
+		}
+
+		if err := telegramClient.SendDetection(payload, chat); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{"status": "success"})
+	})
+
+	// Health check endpoint
+	r.GET("/telegram/health", func(c *gin.Context) {
+		if telegramClient == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "error": "Telegram not configured"})
+			return
+		}
+		c.JSON(200, gin.H{"ok": true})
+	})
+
+	// Test Telegram configuration
+	r.POST("/telegram/test", func(c *gin.Context) {
+		var testConfig map[string]interface{}
+		if err := c.ShouldBindJSON(&testConfig); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+			return
+		}
+
+		// Create a test Telegram client with the provided config
+		testClient, err := telegram.NewTelegramClient(testConfig)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Telegram configuration invalid",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		// Test sending a message to the default chat
+		testMessage := "🧪 **Telegram Test Message**\n\n" +
+			"✅ Configuration is valid\n" +
+			"✅ Bot token is working\n" +
+			"✅ Chat ID is accessible\n\n" +
+			"*This is a test message from your Security Camera UI system.*"
+
+		// Try to send to default chat first, then security chat
+		var sentTo string
+		var sendErr error
+
+		chats := testClient.GetChats()
+		if defaultChat, exists := chats["default"]; exists && defaultChat != "" {
+			sendErr = testClient.SendMessage(testMessage, "default")
+			sentTo = "default chat"
+		} else if securityChat, exists := chats["security_group"]; exists && securityChat != "" {
+			sendErr = testClient.SendMessage(testMessage, "security_group")
+			sentTo = "security group chat"
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "No valid chat IDs configured",
+			})
+			return
+		}
+
+		if sendErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Failed to send test message",
+				"details": sendErr.Error(),
+				"sent_to": sentTo,
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "Test message sent successfully",
+			"sent_to": sentTo,
+			"chats":   testClient.GetChats(),
 		})
 	})
 }

@@ -13,14 +13,14 @@ const (
 
 	// Network configuration
 	Port        = ":8080"
-	TelegramURL = "http://localhost:5000/send_detection"
+	TelegramURL = "http://localhost:8080"
 
 	// Processing configuration
 	MaxWorkers        = 4
 	BatchSize         = 50
 	ThumbnailWorkers  = 4
 	ScanInterval      = 500 * 1000000 // 500ms in nanoseconds (fallback only)
-	DetectionInterval = 500 * 1000000 // 500ms in nanoseconds
+	DetectionInterval = 200 * 1000000 // 200ms in nanoseconds
 
 	// File watcher configuration
 	FileWatcherEnabled = true
