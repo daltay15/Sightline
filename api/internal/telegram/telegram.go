@@ -466,3 +466,125 @@ func (tc *TelegramClient) SendDetection(payload map[string]interface{}, chat str
 func decodeBase64(s string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(s)
 }
+
+// ErrorTelegramClient handles sending error notifications via Python endpoint
+type ErrorTelegramClient struct {
+	pythonEndpoint string
+	client         *http.Client
+}
+
+// NewErrorTelegramClient creates a new error notification client from config
+func NewErrorTelegramClient(config map[string]interface{}) (*ErrorTelegramClient, error) {
+	// Check if error notifications are enabled
+	enabled, ok := config["error_notifications_enabled"].(bool)
+	if !ok || !enabled {
+		return nil, fmt.Errorf("error notifications not enabled")
+	}
+
+	// Get Python endpoint
+	pythonEndpoint, ok := config["error_notifications_python_endpoint"].(string)
+	if !ok || pythonEndpoint == "" {
+		return nil, fmt.Errorf("error notifications python endpoint not configured")
+	}
+
+	return &ErrorTelegramClient{
+		pythonEndpoint: pythonEndpoint,
+		client:         &http.Client{Timeout: 40 * time.Second},
+	}, nil
+}
+
+// SendError sends a basic error notification via Python endpoint
+func (etc *ErrorTelegramClient) SendError(severity, component, message string) error {
+	return etc.SendErrorToPythonEndpoint(severity, component, message, nil, etc.pythonEndpoint)
+}
+
+// SendErrorWithData sends an error notification with additional metadata via Python endpoint
+func (etc *ErrorTelegramClient) SendErrorWithData(severity, component, message string, metadata map[string]interface{}) error {
+	return etc.SendErrorToPythonEndpoint(severity, component, message, metadata, etc.pythonEndpoint)
+}
+
+// SendErrorNotification sends a structured error notification via Python endpoint
+func (etc *ErrorTelegramClient) SendErrorNotification(severity, component, message string, metadata map[string]interface{}, stack, context string) error {
+	// Add stack trace and context to metadata
+	if stack != "" {
+		metadata["stack_trace"] = stack
+	}
+	if context != "" {
+		metadata["context"] = context
+	}
+
+	return etc.SendErrorToPythonEndpoint(severity, component, message, metadata, etc.pythonEndpoint)
+}
+
+// SendErrorToPythonEndpoint sends error data to the Python endpoint
+func (etc *ErrorTelegramClient) SendErrorToPythonEndpoint(severity, component, message string, metadata map[string]interface{}, pythonEndpoint string) error {
+	url := fmt.Sprintf("%s/send", pythonEndpoint)
+
+	// Format the error message for the Python endpoint
+	formattedMessage := formatErrorForPython(severity, component, message, metadata)
+
+	// Create payload that matches the Python endpoint structure
+	payload := map[string]interface{}{
+		"message": formattedMessage,
+		"chat":    "security_group", // Use security_group for error notifications
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	resp, err := etc.client.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to send to Python endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("Python endpoint error: %s", string(body))
+	}
+
+	return nil
+}
+
+// formatErrorForPython formats an error message for the Python endpoint
+func formatErrorForPython(severity, component, message string, metadata map[string]interface{}) string {
+	var emoji string
+	switch severity {
+	case "critical":
+		emoji = "🚨🚨🚨"
+	case "error":
+		emoji = "❌"
+	case "warning":
+		emoji = "⚠️"
+	case "info":
+		emoji = "ℹ️"
+	default:
+		emoji = "🔍"
+	}
+
+	// Create a formatted message for the Python endpoint
+	formattedMessage := fmt.Sprintf("%s *%s* in *%s*\n\n%s",
+		emoji, strings.ToUpper(severity), component, message)
+
+	// Add metadata if available
+	if len(metadata) > 0 {
+		formattedMessage += "\n\n*Additional Data:*\n"
+		for key, value := range metadata {
+			// Handle special formatting for stack traces and context
+			if key == "stack_trace" {
+				formattedMessage += fmt.Sprintf("*Stack Trace:*\n```\n%v\n```\n", value)
+			} else if key == "context" {
+				formattedMessage += fmt.Sprintf("*Context:*\n```\n%v\n```\n", value)
+			} else {
+				formattedMessage += fmt.Sprintf("• %s: %v\n", key, value)
+			}
+		}
+	}
+
+	// Add timestamp
+	formattedMessage += fmt.Sprintf("\n_Time: %s_", time.Now().Format("2006-01-02 15:04:05"))
+
+	return formattedMessage
+}

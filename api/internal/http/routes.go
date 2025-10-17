@@ -138,6 +138,11 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 		countArgs := append([]any{}, args...)
 		countQuery := "SELECT COUNT(*) FROM events e WHERE " + whereSQL + " AND e.camera != 'DETECTION'"
 		if err := db.QueryRow(countQuery, countArgs...).Scan(&total); err != nil {
+			internal.NotifyError("error", "http_routes", "Failed to count events", map[string]interface{}{
+				"query": countQuery,
+				"args":  countArgs,
+				"error": err.Error(),
+			})
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -1672,6 +1677,97 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 			"message": "Test message sent successfully",
 			"sent_to": sentTo,
 			"chats":   testClient.GetChats(),
+		})
+	})
+
+	// Test Error Notification system
+	r.POST("/error-notifications/test", func(c *gin.Context) {
+		var testConfig map[string]interface{}
+		if err := c.ShouldBindJSON(&testConfig); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+			return
+		}
+
+		// Create a test Error Telegram client with the provided config
+		testClient, err := telegram.NewErrorTelegramClient(testConfig)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Error notification configuration invalid",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		// Test sending different types of error notifications
+		testMessage := "🧪 **Error Notification Test**\n\n" +
+			"✅ Configuration is valid\n" +
+			"✅ Error notification system is working\n" +
+			"✅ This is a test error notification\n\n" +
+			"*This is a test message from your Security Camera UI error notification system.*"
+
+		// Test different severity levels
+		severities := []string{"info", "warning", "error", "critical"}
+		var results []map[string]interface{}
+
+		for _, severity := range severities {
+			metadata := map[string]interface{}{
+				"test_type": "error_notification_test",
+				"severity":  severity,
+				"timestamp": time.Now().Format(time.RFC3339),
+			}
+
+			var sendErr error
+			switch severity {
+			case "info":
+				sendErr = testClient.SendErrorWithData(severity, "test_component", testMessage, metadata)
+			case "warning":
+				sendErr = testClient.SendErrorWithData(severity, "test_component", testMessage, metadata)
+			case "error":
+				sendErr = testClient.SendErrorWithData(severity, "test_component", testMessage, metadata)
+			case "critical":
+				sendErr = testClient.SendErrorWithData(severity, "test_component", testMessage, metadata)
+			}
+
+			errorMsg := ""
+			if sendErr != nil {
+				errorMsg = sendErr.Error()
+			}
+			results = append(results, map[string]interface{}{
+				"severity": severity,
+				"success":  sendErr == nil,
+				"error":    errorMsg,
+			})
+		}
+
+		// Test Python endpoint if configured
+		pythonEndpoint := ""
+		if endpoint, ok := testConfig["error_notifications_python_endpoint"].(string); ok {
+			pythonEndpoint = endpoint
+		}
+
+		if pythonEndpoint != "" {
+			metadata := map[string]interface{}{
+				"test_type": "python_endpoint_test",
+				"timestamp": time.Now().Format(time.RFC3339),
+			}
+
+			pythonErr := testClient.SendErrorToPythonEndpoint("info", "test_component", "Python endpoint test", metadata, pythonEndpoint)
+			pythonErrorMsg := ""
+			if pythonErr != nil {
+				pythonErrorMsg = pythonErr.Error()
+			}
+			results = append(results, map[string]interface{}{
+				"severity": "python_endpoint",
+				"success":  pythonErr == nil,
+				"error":    pythonErrorMsg,
+			})
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success":         true,
+			"message":         "Error notification test completed",
+			"results":         results,
+			"python_endpoint": pythonEndpoint,
 		})
 	})
 }

@@ -57,6 +57,26 @@ func main() {
 
 	backupManager := internal.NewBackupManager(dbPath, backupDir, backupEnabled, backupInterval)
 
+	// Initialize error notification service
+	var errorNotifier *telegram.ErrorTelegramClient
+	errorNotificationsEnabled := configManager.GetBool("error_notifications_enabled", false)
+	pythonEndpoint := configManager.GetString("error_notifications_python_endpoint", "")
+
+	if errorNotificationsEnabled {
+		configData := configManager.GetConfig()
+		var err error
+		errorNotifier, err = telegram.NewErrorTelegramClient(configData)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize error notification service: %v", err)
+			errorNotifier = nil
+		} else {
+			log.Printf("Error notification service initialized successfully")
+		}
+	}
+
+	// Initialize global error notifier
+	internal.InitErrorNotifier(errorNotifier, pythonEndpoint, errorNotificationsEnabled)
+
 	log.Printf("Configuration: rootDir=%s, completedDir=%s, port=%s", rootDir, completedDir, port)
 	log.Printf("Backup settings: enabled=%v, interval=%s", backupEnabled, backupInterval)
 

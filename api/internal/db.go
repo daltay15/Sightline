@@ -10,6 +10,10 @@ import (
 func OpenDB(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)")
 	if err != nil {
+		NotifyCriticalError("database", "Failed to open database", map[string]interface{}{
+			"path":  path,
+			"error": err.Error(),
+		})
 		return nil, err
 	}
 
@@ -31,6 +35,10 @@ func OpenDB(path string) (*sql.DB, error) {
 
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
+			NotifyCriticalError("database", "Failed to configure database pragma", map[string]interface{}{
+				"pragma": pragma,
+				"error":  err.Error(),
+			})
 			return nil, err
 		}
 	}

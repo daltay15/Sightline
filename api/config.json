@@ -18,5 +18,11 @@
   "server_port": 8080,
   "thumbnail_quality": 85,
   "thumbnail_size": 320,
+  "telegram_enabled": false,
+  "telegram_token": "",
+  "telegram_default_chat": "",
+  "telegram_security_chat": "",
+  "error_notifications_enabled": false,
+  "error_notifications_python_endpoint": "http://localhost:5000",
   "updated_at": 1760169707
 }
