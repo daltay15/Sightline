@@ -892,10 +892,16 @@ function updateVideoProcessingStatus() {
   const checkedPaths = new Set(); // Track already checked paths to avoid duplicates
   const now = Date.now() / 1000;
   let hasProcessingButtons = false;
+  let hasNoVideoButtons = false;
   
   videoButtons.forEach(btn => {
-    if (btn.textContent === 'Video Processing...') {
-      hasProcessingButtons = true;
+    if (btn.textContent === 'Video Processing...' || btn.textContent === 'No Video') {
+      if (btn.textContent === 'Video Processing...') {
+        hasProcessingButtons = true;
+      } else {
+        hasNoVideoButtons = true;
+      }
+      
       // Find the event data for this button
       const card = btn.closest('.card');
       if (card) {
@@ -945,8 +951,8 @@ function updateVideoProcessingStatus() {
     }
   });
   
-  // If we have processing buttons, trigger database update to find new videos
-  if (hasProcessingButtons) {
+  // If we have processing or no-video buttons, trigger database update to find new videos
+  if (hasProcessingButtons || hasNoVideoButtons) {
     fetch('/update-video-metadata', { method: 'POST' })
       .then(response => response.json())
       .then(data => {
@@ -1079,11 +1085,11 @@ function card(e){
   div.dataset.eventTime = e.startTs; // Add event timestamp for processing checks
   
   // Store expected video path for processing checks
-  let expectedVideoPath = e.videoPath || e.correlatedVideoPath || e.path;
-  if (expectedVideoPath && expectedVideoPath.toLowerCase().endsWith('.jpg')) {
-    expectedVideoPath = expectedVideoPath.replace(/\.jpg$/i, '.mp4');
+  let storedExpectedVideoPath = e.videoPath || e.correlatedVideoPath || e.path;
+  if (storedExpectedVideoPath && storedExpectedVideoPath.toLowerCase().endsWith('.jpg')) {
+    storedExpectedVideoPath = storedExpectedVideoPath.replace(/\.jpg$/i, '.mp4');
   }
-  div.dataset.expectedVideoPath = expectedVideoPath;
+  div.dataset.expectedVideoPath = storedExpectedVideoPath;
   
   const img = document.createElement('img'); 
   img.className='thumb'; 
@@ -1140,6 +1146,12 @@ function card(e){
   const isRecent = (now - eventTime) < 300; // 5 minutes
   const isVeryRecent = (now - eventTime) < 60; // 1 minute
   
+  // Try to construct expected video path if no video path is stored
+  let expectedVideoPath = e.videoPath || e.correlatedVideoPath;
+  if (!expectedVideoPath && e.path && e.path.toLowerCase().endsWith('.jpg')) {
+    expectedVideoPath = e.path.replace(/\.jpg$/i, '.mp4');
+  }
+  
   if (!hasVideo) {
     if (isRecent) {
       videoBtn.textContent = 'Video Processing...';
@@ -1153,7 +1165,7 @@ function card(e){
   
   videoBtn.onclick = (event) => {
     event.stopPropagation();
-    if (!hasVideo) {
+    if (!hasVideo && !expectedVideoPath) {
       alert('No video available for this event');
       return;
     }
@@ -1170,7 +1182,7 @@ function card(e){
     videoBtn.classList.add('active');
     
     // Use source element with path parameter (like detections page)
-    let videoPath = e.videoPath;
+    let videoPath = e.videoPath || expectedVideoPath;
     if (!videoPath && e.path && e.path.toLowerCase().endsWith('.jpg')) {
       videoPath = e.path.replace(/\.jpg$/i, '.mp4');
     }
@@ -1386,10 +1398,22 @@ document.getElementById('reset').onclick = ()=>{
   populateCameraDropdown(); // Refresh camera dropdown
   loadPage(false);
 };
-document.getElementById('refresh').onclick = ()=>{
+document.getElementById('refresh').onclick = async ()=>{
   // Stop all videos before refreshing
   stopAllVideos();
   stopAutoRefresh();
+  
+  // Trigger video metadata update before refreshing
+  try {
+    const response = await fetch('/update-video-metadata', { method: 'POST' });
+    const data = await response.json();
+    if (data.updated > 0) {
+      console.log(`Updated ${data.updated} video metadata entries during refresh`);
+    }
+  } catch (err) {
+    console.log('Error updating video metadata during refresh:', err);
+  }
+  
   loadPage(false);
 };
 
@@ -1632,8 +1656,26 @@ function createEventCard(event) {
   return card;
 }
 
-// Update video processing status every 15 seconds
-setInterval(updateVideoProcessingStatus, 15000);
+// Update video processing status every 10 seconds for more responsive updates
+setInterval(updateVideoProcessingStatus, 10000);
+
+// Trigger video metadata update on page load to populate video paths
+async function triggerVideoMetadataUpdate() {
+  try {
+    const response = await fetch('/update-video-metadata', { method: 'POST' });
+    const data = await response.json();
+    if (data.updated > 0) {
+      console.log(`Updated ${data.updated} video metadata entries`);
+      // Refresh the page to get updated data
+      debouncedRefresh();
+    }
+  } catch (err) {
+    console.log('Error updating video metadata:', err);
+  }
+}
+
+// Trigger video metadata update on page load
+triggerVideoMetadataUpdate();
 
 // Start auto-refresh on page load
 startAutoRefresh();
@@ -1829,8 +1871,23 @@ mobileReset.addEventListener('click', function() {
   document.getElementById('reset').click();
 });
 
-mobileRefresh.addEventListener('click', function() {
-  document.getElementById('refresh').click();
+mobileRefresh.addEventListener('click', async function() {
+  // Stop all videos before refreshing
+  stopAllVideos();
+  stopAutoRefresh();
+  
+  // Trigger video metadata update before refreshing
+  try {
+    const response = await fetch('/update-video-metadata', { method: 'POST' });
+    const data = await response.json();
+    if (data.updated > 0) {
+      console.log(`Updated ${data.updated} video metadata entries during mobile refresh`);
+    }
+  } catch (err) {
+    console.log('Error updating video metadata during mobile refresh:', err);
+  }
+  
+  loadPage(false);
 });
 
 // Mobile date range functions
