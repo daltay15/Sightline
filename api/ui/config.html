@@ -708,6 +708,31 @@
             </div>
         </div>
 
+        <!-- Error Notifications Configuration -->
+        <div class="config-section">
+            <h2>🚨 Error Notifications</h2>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="errorNotificationsEnabled">Enable Error Notifications</label>
+                    <select id="errorNotificationsEnabled">
+                        <option value="false">Disabled</option>
+                        <option value="true">Enabled</option>
+                    </select>
+                    <div class="help-text">Enable error notifications via Python endpoint.</div>
+                </div>
+                <div class="config-item">
+                    <label for="errorNotificationsPythonEndpoint">Python Endpoint URL</label>
+                    <input type="text" id="errorNotificationsPythonEndpoint" placeholder="http://localhost:5000">
+                    <div class="help-text">URL of your Python endpoint that handles error notifications.</div>
+                </div>
+                <div class="config-item">
+                    <label for="testErrorNotifications">Test Error Notifications</label>
+                    <button type="button" id="testErrorNotifications" class="secondary">Test Error Notifications</button>
+                    <div class="help-text">Test the error notification system by sending a test error.</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Security Configuration -->
         <div class="config-section">
             <h2>🔒 Security Settings</h2>
@@ -852,6 +877,10 @@
             document.getElementById('telegramToken').value = config.telegram_token || '';
             document.getElementById('telegramDefaultChat').value = config.telegram_default_chat || '';
             document.getElementById('telegramSecurityChat').value = config.telegram_security_chat || '';
+            
+            // Error Notifications
+            document.getElementById('errorNotificationsEnabled').value = config.error_notifications_enabled ? 'true' : 'false';
+            document.getElementById('errorNotificationsPythonEndpoint').value = config.error_notifications_python_endpoint || 'http://localhost:5000';
         }
         
         // Collect form data
@@ -880,7 +909,9 @@
                 telegram_enabled: document.getElementById('telegramEnabled').value === 'true',
                 telegram_token: document.getElementById('telegramToken').value,
                 telegram_default_chat: document.getElementById('telegramDefaultChat').value,
-                telegram_security_chat: document.getElementById('telegramSecurityChat').value
+                telegram_security_chat: document.getElementById('telegramSecurityChat').value,
+                error_notifications_enabled: document.getElementById('errorNotificationsEnabled').value === 'true',
+                error_notifications_python_endpoint: document.getElementById('errorNotificationsPythonEndpoint').value
             };
         }
         
@@ -990,6 +1021,40 @@
                 console.error('Error testing Telegram:', error);
                 testOutput.textContent = `❌ Error testing Telegram: ${error.message}`;
                 showStatus('Error testing Telegram: ' + error.message, 'error');
+            }
+        });
+        
+        // Test Error Notifications
+        document.getElementById('testErrorNotifications').addEventListener('click', async function() {
+            const config = collectFormData();
+            const testResults = document.getElementById('testResults');
+            const testOutput = document.getElementById('testOutput');
+            
+            testResults.className = 'test-results show';
+            testOutput.textContent = 'Testing Error Notifications configuration...';
+            
+            try {
+                const response = await fetch('/error-notifications/test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    testOutput.textContent = `✅ Error Notifications test successful!\n\n${JSON.stringify(result, null, 2)}`;
+                    showStatus('Error Notifications test completed successfully', 'success');
+                } else {
+                    testOutput.textContent = `❌ Error Notifications test failed:\n\n${JSON.stringify(result, null, 2)}`;
+                    showStatus('Error Notifications test failed: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                console.error('Error testing Error Notifications:', error);
+                testOutput.textContent = `❌ Error testing Error Notifications: ${error.message}`;
+                showStatus('Error testing Error Notifications: ' + error.message, 'error');
             }
         });
         

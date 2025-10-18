@@ -31,6 +31,9 @@ type FileWatcher struct {
 func NewFileWatcher(db *sql.DB, rootDir, thumbsDir, pendingDir, telegramURL string) *FileWatcher {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
+		NotifyCriticalError("file_watcher", "Failed to create file watcher", map[string]interface{}{
+			"error": err.Error(),
+		})
 		log.Fatalf("Failed to create file watcher: %v", err)
 	}
 

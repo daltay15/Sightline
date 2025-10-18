@@ -21,6 +21,8 @@
   "telegram_token": "",
   "telegram_default_chat": "",
   "telegram_security_chat": "",
+  "error_notifications_enabled": false,
+  "error_notifications_python_endpoint": "http://localhost:5000",
   "created_at": 1700000000,
   "updated_at": 1700000000
 }

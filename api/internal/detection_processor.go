@@ -100,6 +100,10 @@ func (dp *DetectionProcessor) ProcessCompletedFiles() error {
 	err := filepath.WalkDir(dp.completedDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			dp.logger.Printf("Error walking directory %s: %v", path, err)
+			NotifyError("error", "detection_processor", "Failed to walk directory", map[string]interface{}{
+				"path":  path,
+				"error": err.Error(),
+			})
 			return err
 		}
 

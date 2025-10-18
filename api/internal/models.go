@@ -116,3 +116,26 @@ type StatusResponse struct {
 	Performance PerformanceStats `json:"performance"`
 	Timestamp   string           `json:"timestamp"`
 }
+
+// Error Notification Models
+type ErrorNotification struct {
+	ID        string                 `json:"id"`
+	Type      string                 `json:"type"`
+	Severity  string                 `json:"severity"`
+	Message   string                 `json:"message"`
+	Component string                 `json:"component"`
+	Timestamp string                 `json:"timestamp"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	Stack     string                 `json:"stack,omitempty"`
+	Context   map[string]interface{} `json:"context,omitempty"`
+}
+
+type ErrorNotificationRequest struct {
+	Type      string                 `json:"type"`
+	Severity  string                 `json:"severity"`
+	Message   string                 `json:"message"`
+	Component string                 `json:"component"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	Stack     string                 `json:"stack,omitempty"`
+	Context   map[string]interface{} `json:"context,omitempty"`
+}
