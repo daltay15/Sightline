@@ -96,7 +96,7 @@ CPU_CONFIG = {
     "imgsz": 1280,
     "task": "detect",
     "api_endpoint": "http://localhost:8080/ingest_detection",
-    "disable_api": False
+    "disable_api": True
 }
 
 # GPU optimization constants  
@@ -114,7 +114,7 @@ GPU_CONFIG = {
     "imgsz": 1280,
     "task": "detect",
     "api_endpoint": "http://localhost:8080/ingest_detection",
-    "disable_api": False
+    "disable_api": True
 }
 
 # --------- Model Wrapper ---------
