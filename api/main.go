@@ -608,6 +608,13 @@ func main() {
 		})
 	})
 
+	// Disk monitoring status endpoint
+	r.GET("/disk-monitor-status", func(c *gin.Context) {
+		diskMonitor := internal.NewDiskMonitor(configManager.GetConfig())
+		status := diskMonitor.GetStatus()
+		c.JSON(200, status)
+	})
+
 	// Configuration endpoints
 	r.GET("/api/config", func(c *gin.Context) {
 		// Load current configuration from file
@@ -943,6 +950,10 @@ func main() {
 			time.Sleep(time.Duration(config.ScanInterval))
 		}
 	}()
+
+	// Disk space monitoring
+	diskMonitor := internal.NewDiskMonitor(configManager.GetConfig())
+	diskMonitor.Start()
 
 	log.Printf("All goroutines started, entering select loop")
 	select {}
