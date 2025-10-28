@@ -22,7 +22,6 @@ Notes:
 - Classification emits a JSON (+TXT optional); detection also writes annotated image.
 """
 
-import argparse
 import logging
 import signal
 import sys
@@ -31,6 +30,7 @@ import time
 import json
 import os  # NEW: env config must happen before torch import
 import requests
+import base64
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,78 +47,105 @@ from ultralytics import YOLO
 import torch  # import after allocator env is set
 import cv2
 
-# --------- CLI ---------
+# --------- Configuration Management ---------
 
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Watch a folder and run YOLO on images.")
-    p.add_argument("--base", help="Base folder (contains pending/processing/completed/failed)")
-    p.add_argument("--model", default="yolov8n-cls.pt", help="Ultralytics weights (e.g., yolov8n-cls.pt or yolov8n.pt)")
-    p.add_argument("--device", default="auto", help="Device: 'cpu', 'cuda:0', or 'auto'")
-    p.add_argument("--task", choices=["classify", "detect"], default="classify", help="Classification or detection run mode")
-    p.add_argument("--topk", type=int, default=5, help="Top-K classes for classification")
-    p.add_argument("--poll", type=float, default=0.5, help="Polling interval (seconds)")
-    p.add_argument("--workers", type=int, default=1, help="Parallel workers (unused; single-threaded pipeline)")
-    p.add_argument("--once", action="store_true", help="Process current pending files then exit (no watch)")
-    p.add_argument("--imgsz", type=int, default=640, help="Inference size (e.g., 224/320/640). Lower reduces VRAM.")
-    p.add_argument("--batch-size", type=int, default=8, help="Batch size (reduce if VRAM tight)")
-    p.add_argument("--max-batch", type=int, default=64, help="Upper bound for auto-batching logic")
-    p.add_argument("--mixed-precision", action="store_true", help="Enable FP16/half precision on CUDA")
-    p.add_argument("--compile", action="store_true", help="Enable torch.compile (PT2). Slower first run.")
-    p.add_argument("--no-compile", action="store_true", help="Force disable compile")
-    p.add_argument("--skip-delete", action="store_true", help="Do not delete originals after success")
-    p.add_argument("--tta", action="store_true", help="Test-time augmentation (slower, sometimes better)")
-    p.add_argument("--conf", type=float, default=0.25, help="Detection confidence threshold")
-    p.add_argument("--iou", type=float, default=0.45, help="Detection IoU threshold")
-    # NEW knobs for stability while gaming
-    p.add_argument("--vram-fraction", type=float, default=0.45, help="Max VRAM fraction this process can use")
-    p.add_argument("--yield-ms", type=int, default=20, help="Sleep this many ms after each inference to keep desktop responsive")
-    # API endpoint configuration
-    p.add_argument("--api-endpoint", default="http://localhost:8080/ingest_detection", help="API endpoint URL for sending detection data")
-    p.add_argument("--disable-api", action="store_true", help="Disable sending data to API endpoint")
-    # CPU optimization
-    p.add_argument("--cpu", action="store_true", help="Force CPU processing with optimized settings (imgsz 640+, batch-size 1)")
-    return p.parse_args()
+def load_config(config_path: str) -> dict:
+    """
+    Load configuration from JSON file.
+    
+    Args:
+        config_path: Path to the JSON configuration file
+        
+    Returns:
+        Dictionary containing CPU and GPU configurations
+    """
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        # Validate required sections
+        if "cpu_config" not in config or "gpu_config" not in config:
+            raise ValueError("Configuration file must contain 'cpu_config' and 'gpu_config' sections")
+        
+        logging.info(f"✅ Configuration loaded from: {config_path}")
+        return config
+        
+    except FileNotFoundError:
+        logging.warning(f"⚠️ Configuration file not found: {config_path}")
+        logging.info("Using default configuration...")
+        return get_default_config()
+    except json.JSONDecodeError as e:
+        logging.error(f"❌ Invalid JSON in configuration file {config_path}: {e}")
+        logging.info("Using default configuration...")
+        return get_default_config()
+    except Exception as e:
+        logging.error(f"❌ Error loading configuration from {config_path}: {e}")
+        logging.info("Using default configuration...")
+        return get_default_config()
 
-# --------- Configuration Constants ---------
-
-# CPU optimization constants
-CPU_CONFIG = {
-    "max_threads": 6,
-    "batch_size": 1,
-    "min_imgsz": 640,
-    "mixed_precision": False,
-    "compile": False,
-    "yield_ms": 0,  # No yield needed on CPU
-    "vram_fraction": None,  # Not applicable to CPU
-    "device": "cpu",
-    "base": "/mnt/nas/pool/Cameras/GPU_Processing",
-    "model": "yolo11x.pt",
-    "imgsz": 1280,
-    "task": "detect",
-    "api_endpoint": "http://localhost:8080/ingest_detection",
-    "disable_api": True
-}
-
-# GPU optimization constants  
-GPU_CONFIG = {
-    "max_threads": None,  # Use all available threads
-    "batch_size": 6,  # Your preferred batch size
-    "min_imgsz": 224,
-    "mixed_precision": True,  # Can be enabled
-    "compile": True,  # Can be enabled
-    "yield_ms": 20,  # Yield to keep desktop responsive
-    "vram_fraction": 0.75,  # Your preferred VRAM fraction
-    "device": "auto",
-    "base": "/mnt/nas/pool/Cameras/GPU_Processing",
-    "model": "yolo11x.pt",
-    "imgsz": 1280,
-    "task": "detect",
-    "api_endpoint": "http://localhost:8080/ingest_detection",
-    "disable_api": True
-}
+def get_default_config() -> dict:
+    """
+    Get default configuration as fallback.
+    
+    Returns:
+        Dictionary containing default CPU and GPU configurations
+    """
+    return {
+        "cpu_config": {
+            "max_threads": 6,
+            "batch_size": 1,
+            "min_imgsz": 640,
+            "mixed_precision": False,
+            "compile": False,
+            "yield_ms": 0,
+            "vram_fraction": None,
+            "device": "cpu",
+            "base": "/mnt/nas/pool/Cameras/GPU_Processing",
+            "model": "yolo11x.pt",
+            "imgsz": 1280,
+            "task": "detect",
+            "api_endpoint": "http://localhost:8080/ingest_detection",
+            "telegram_endpoint": "http://localhost:8080/telegram/send_detection",
+            "disable_api": True,
+            "disable_telegram": False,
+            "topk": 5,
+            "poll": 0.5,
+            "workers": 1,
+            "skip_delete": False,
+            "once": False,
+            "conf": 0.25,
+            "iou": 0.45,
+            "tta": False
+        },
+        "gpu_config": {
+            "max_threads": None,
+            "batch_size": 6,
+            "min_imgsz": 224,
+            "mixed_precision": True,
+            "compile": True,
+            "yield_ms": 20,
+            "vram_fraction": 0.75,
+            "device": "auto",
+            "base": "/mnt/nas/pool/Cameras/GPU_Processing",
+            "model": "yolo11x.pt",
+            "imgsz": 1280,
+            "task": "detect",
+            "api_endpoint": "http://localhost:8080/ingest_detection",
+            "telegram_endpoint": "http://localhost:8080/telegram/send_detection",
+            "disable_api": True,
+            "disable_telegram": False,
+            "topk": 5,
+            "poll": 0.5,
+            "workers": 1,
+            "skip_delete": False,
+            "once": False,
+            "conf": 0.25,
+            "iou": 0.45,
+            "tta": False
+        }
+    }
 
 # --------- Model Wrapper ---------
-
 @dataclass
 class ClassificationResult:
     path: str
@@ -229,7 +256,7 @@ class YOLOClassifier:
                     logging.warning(f"Model compile failed: {e}. Continuing without.")
         elif self.device == "cpu":
             # CPU-specific optimizations
-            max_threads = CPU_CONFIG["max_threads"]
+            max_threads = 6  # Default CPU thread limit
             if max_threads:
                 torch.set_num_threads(min(max_threads, torch.get_num_threads()))
                 logging.info(f"🖥️ CPU optimizations: limited to {max_threads} threads, no mixed precision")
@@ -351,7 +378,7 @@ class YOLODetector:
                     logging.warning(f"Model compile failed: {e}. Continuing without.")
         elif self.device == "cpu":
             # CPU-specific optimizations
-            max_threads = CPU_CONFIG["max_threads"]
+            max_threads = 6  # Default CPU thread limit
             if max_threads:
                 torch.set_num_threads(min(max_threads, torch.get_num_threads()))
                 logging.info(f"🖥️ CPU optimizations: limited to {max_threads} threads, no mixed precision")
@@ -447,6 +474,104 @@ class YOLODetector:
 
 # --------- API Integration ---------
 
+def send_detection_to_telegram(detection_result: DetectionResult, original_path: str, 
+                              telegram_endpoint: str, camera_name: str = None) -> bool:
+    """
+    Send detection data directly to Telegram endpoint for immediate alerting.
+    
+    Args:
+        detection_result: DetectionResult object with detection data
+        original_path: Path to the original image file
+        telegram_endpoint: Telegram endpoint URL
+        camera_name: Optional camera name for the alert
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Extract camera name from path if not provided
+        if not camera_name:
+            # Try to extract camera name from filename (format: ID__CameraName_XX_timestamp.jpg)
+            filename = Path(original_path).stem  # Get filename without extension
+            if "__" in filename:
+                # Split by "__" and take the second part, then split by "_" and take the first part
+                parts = filename.split("__")
+                if len(parts) >= 2:
+                    camera_part = parts[1].split("_")[0]  # Get camera name before first underscore
+                    if camera_part:
+                        camera_name = camera_part.replace("_", " ")  # Replace underscores with spaces
+                    else:
+                        camera_name = "Unknown Camera"
+                else:
+                    camera_name = "Unknown Camera"
+            else:
+                # Fallback to parent directory name
+                path_parts = Path(original_path).parts
+                if len(path_parts) > 1:
+                    camera_name = path_parts[-2]  # Use parent directory as camera name
+                else:
+                    camera_name = "Unknown Camera"
+        
+        # Check if any detection is a person (same logic as Go code)
+        has_person = False
+        person_detections = []
+        for detection in detection_result.dets:
+            if detection.get("label", "").lower() == "person":
+                has_person = True
+                person_detections.append(detection)
+        
+        if not has_person:
+            logging.info("No person detected, skipping Telegram alert")
+            return True  # Not an error, just no alert needed
+        
+        # Read and encode the annotated image (same logic as Go code)
+        image_b64 = ""
+        image_name = ""
+        if detection_result.annotated_path and Path(detection_result.annotated_path).exists():
+            try:
+                with open(detection_result.annotated_path, 'rb') as img_file:
+                    image_data = img_file.read()
+                    image_b64 = base64.b64encode(image_data).decode('utf-8')
+                    image_name = Path(detection_result.annotated_path).name
+                    logging.info(f"Encoded annotated image: {image_name} ({len(image_data)} bytes)")
+            except Exception as e:
+                logging.warning(f"Failed to read annotated image {detection_result.annotated_path}: {e}")
+        
+        # Format payload for Telegram endpoint (same structure as Go code)
+        payload = {
+            "camera_name": camera_name,
+            "timestamp": int(time.time()),
+            "detections": person_detections,  # Only send person detections
+            "duration_ms": detection_result.duration_ms,
+            "chat": "security_group"  # Default chat group
+        }
+        
+        # Add image data if available (same priority as Go code)
+        if image_b64:
+            payload["annotated_image_b64"] = image_b64
+            payload["annotated_image_name"] = image_name
+        elif detection_result.annotated_path:
+            payload["annotated_image_path"] = detection_result.annotated_path
+        
+        logging.info(f"Sending detection alert to Telegram: {payload}")
+        response = requests.post(telegram_endpoint, json=payload, timeout=30)
+        logging.info(f"Telegram response: {response}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            logging.info(f"✅ Telegram alert sent successfully: {result.get('status', 'Success')}")
+            return True
+        else:
+            logging.error(f"❌ Telegram request failed with status {response.status_code}: {response.text}")
+            return False
+            
+    except requests.exceptions.RequestException as e:
+        logging.error(f"❌ Failed to send Telegram alert: {e}")
+        return False
+    except Exception as e:
+        logging.error(f"❌ Unexpected error sending Telegram alert: {e}")
+        return False
+
 def send_detection_to_api(original_path: str, annotated_path: str, detection_data_path: Dict[str, Any], 
                          api_endpoint: str, success: bool = True) -> Dict[str, Any]:
     """
@@ -525,7 +650,7 @@ def write_txt(path: Path, lines: List[str]):
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
-def process_one(img_in_pending: Path, base: Path, runner, topk: int, api_endpoint: str = None, disable_api: bool = False) -> None:
+def process_one(img_in_pending: Path, base: Path, runner, topk: int, api_endpoint: str = None, disable_api: bool = False, telegram_endpoint: str = None, disable_telegram: bool = False) -> None:
     processing_dir = base / "processing"
     completed_dir = base / "completed"
     failed_dir = base / "failed"
@@ -542,6 +667,21 @@ def process_one(img_in_pending: Path, base: Path, runner, topk: int, api_endpoin
 
         if isinstance(runner, YOLODetector):
             det = runner.detect(processing_path)
+            logging.info(f"Detection result: {det}")
+            # Send Telegram alert immediately after detection (ASAP alerting)
+            if not disable_telegram and telegram_endpoint:
+                logging.info(f"Sending Telegram alert to: {telegram_endpoint}")
+                telegram_success = send_detection_to_telegram(
+                    detection_result=det,
+                    original_path=str(processing_path),
+                    telegram_endpoint=telegram_endpoint
+                )
+                if telegram_success:
+                    logging.info("🚨 Telegram alert sent immediately for detection")
+                else:
+                    logging.error("❌ Telegram alert failed")
+            else:
+                logging.warning(f"Telegram alert skipped - disable_telegram: {disable_telegram}, telegram_endpoint: {telegram_endpoint}")
 
             stem = processing_path.stem
             json_path = processing_path.with_suffix("").parent / f"{stem}.json"
@@ -621,7 +761,7 @@ def process_one(img_in_pending: Path, base: Path, runner, topk: int, api_endpoin
         err_txt = failed_dir / f"{img_in_pending.stem}_error.txt"
         write_txt(err_txt, [f"Error: {e}"])
 
-def process_batch(batch_imgs: List[Path], base: Path, runner, topk: int, skip_delete: bool = False, stop_flag: bool = False, api_endpoint: str = None, disable_api: bool = False) -> None:
+def process_batch(batch_imgs: List[Path], base: Path, runner, topk: int, skip_delete: bool = False, stop_flag: bool = False, api_endpoint: str = None, disable_api: bool = False, telegram_endpoint: str = None, disable_telegram: bool = False) -> None:
     """Process a batch of images (true batch)"""
     processing_dir = base / "processing"
     completed_dir = base / "completed"
@@ -670,6 +810,22 @@ def process_batch(batch_imgs: List[Path], base: Path, runner, topk: int, skip_de
 
             def process_single_result(args):
                 processing_path, det, completed_dir = args
+                
+                # Send Telegram alert immediately after detection (ASAP alerting)
+                if not disable_telegram and telegram_endpoint:
+                    logging.info(f"Sending Telegram alert to: {telegram_endpoint}")
+                    telegram_success = send_detection_to_telegram(
+                        detection_result=det,
+                        original_path=str(processing_path),
+                        telegram_endpoint=telegram_endpoint
+                    )
+                    if telegram_success:
+                        logging.info("🚨 Telegram alert sent immediately for detection")
+                    else:
+                        logging.error("❌ Telegram alert failed")
+                else:
+                    logging.warning(f"Telegram alert skipped - disable_telegram: {disable_telegram}, telegram_endpoint: {telegram_endpoint}")
+                
                 stem = processing_path.stem
                 json_path = processing_path.with_suffix("").parent / f"{stem}.json"
                 ann_path = Path(det.annotated_path)
@@ -816,7 +972,7 @@ def find_pending_images(base: Path) -> list[Path]:
         logging.error("Error scanning pending directory %s: %s", pending_dir, e)
     return sorted(files)
 
-def run_once(base: Path, runner, topk: int, workers: int = 1, batch_size: int = 8, skip_delete: bool = False, api_endpoint: str = None, disable_api: bool = False):
+def run_once(base: Path, runner, topk: int, workers: int = 1, batch_size: int = 8, skip_delete: bool = False, api_endpoint: str = None, disable_api: bool = False, telegram_endpoint: str = None, disable_telegram: bool = False):
     imgs = find_pending_images(base)
     if not imgs:
         logging.info("No pending images to process.")
@@ -846,7 +1002,7 @@ def run_once(base: Path, runner, topk: int, workers: int = 1, batch_size: int = 
             logging.info("Processing batch %d/%d (%d images)", i//batch_size + 1, (len(imgs) + batch_size - 1)//batch_size, len(batch_imgs))
             if batch_size > 1:
                 try:
-                    process_batch(batch_imgs, base, runner, topk, skip_delete, stop, api_endpoint, disable_api)
+                    process_batch(batch_imgs, base, runner, topk, skip_delete, stop, api_endpoint, disable_api, telegram_endpoint, disable_telegram)
                 except Exception as e:
                     logging.error(f"Batch processing failed: {e}")
                     if stop:
@@ -855,7 +1011,7 @@ def run_once(base: Path, runner, topk: int, workers: int = 1, batch_size: int = 
                 for img in batch_imgs:
                     if stop:
                         break
-                    process_one(img, base, runner, topk, api_endpoint, disable_api)
+                    process_one(img, base, runner, topk, api_endpoint, disable_api, telegram_endpoint, disable_telegram)
                     
     except KeyboardInterrupt:
         print("\nKeyboardInterrupt received, stopping batch processing...")
@@ -867,7 +1023,7 @@ def run_once(base: Path, runner, topk: int, workers: int = 1, batch_size: int = 
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
-def run_watch(base: Path, runner, topk: int, poll: float, workers: int, api_endpoint: str = None, disable_api: bool = False):
+def run_watch(base: Path, runner, topk: int, poll: float, workers: int, api_endpoint: str = None, disable_api: bool = False, telegram_endpoint: str = None, disable_telegram: bool = False):
     logging.info("Watching %s for new images... (poll=%.2fs)", (base / 'pending'), poll)
     stop = False
 
@@ -886,7 +1042,7 @@ def run_watch(base: Path, runner, topk: int, poll: float, workers: int, api_endp
             for img in new_files:
                 if stop:
                     break
-                process_one(img, base, runner, topk, api_endpoint, disable_api)
+                process_one(img, base, runner, topk, api_endpoint, disable_api, telegram_endpoint, disable_telegram)
             if not stop:
                 time.sleep(poll)
     except KeyboardInterrupt:
@@ -896,104 +1052,113 @@ def run_watch(base: Path, runner, topk: int, poll: float, workers: int, api_endp
         logging.info("Shutdown complete")
 
 def main():
-    args = parse_args()
+    # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format="[%(asctime)s] [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     
-    # Cap VRAM early to keep system responsive
-    if torch.cuda.is_available():
-        cap_vram(fraction=args.vram_fraction, device_index=0)
-
-    # Check GPU availability and info
-    gpu_type = check_gpu_info()
+    # Load configuration from JSON file
+    config_data = load_config("config.json")
     
-    # Apply CPU or GPU configuration first
-    if args.cpu:
-        config = CPU_CONFIG
-        logging.info("🖥️ CPU mode enabled - applying CPU optimizations")
-        args.device = config["device"]
-        args.batch_size = config["batch_size"]
-        args.model = config["model"]
-        args.imgsz = config["imgsz"]
-        args.task = config["task"]
-        args.mixed_precision = config["mixed_precision"]
-        args.compile = config["compile"]
-        args.yield_ms = config["yield_ms"]
-        # Apply path and API configuration
-        args.base = config["base"]
-        args.api_endpoint = config["api_endpoint"]
-        args.disable_api = config["disable_api"]
-        # VRAM fraction not applicable to CPU
-        logging.info(f"✅ CPU config: device={config['device']}, task={config['task']}, model={config['model']}, imgsz={config['imgsz']}, batch_size={config['batch_size']}, mixed_precision={config['mixed_precision']}, compile={config['compile']}, base={config['base']}, api_endpoint={config['api_endpoint']}")
+    # Determine if we should use CPU or GPU mode
+    use_cpu = False
+    if torch.cuda.is_available():
+        # Check GPU availability and info
+        gpu_type = check_gpu_info()
+        if gpu_type:
+            logging.info("🚀 GPU detected - using GPU configuration")
+            config = config_data["gpu_config"]
+        else:
+            logging.info("🖥️ No GPU available - using CPU configuration")
+            use_cpu = True
+            config = config_data["cpu_config"]
     else:
-        config = GPU_CONFIG
+        logging.info("🖥️ CUDA not available - using CPU configuration")
+        use_cpu = True
+        config = config_data["cpu_config"]
+    
+    # Apply configuration
+    if use_cpu:
+        logging.info("🖥️ CPU mode - applying CPU optimizations")
+        device = config["device"]
+        batch_size = config["batch_size"]
+        model = config["model"]
+        imgsz = config["imgsz"]
+        task = config["task"]
+        mixed_precision = config["mixed_precision"]
+        compile_model = config["compile"]
+        yield_ms = config["yield_ms"]
+        vram_fraction = None  # Not applicable to CPU
+    else:
         logging.info("🚀 GPU mode - applying GPU optimizations")
-        args.device = config["device"]
-        args.model = config["model"]
-        args.imgsz = config["imgsz"]
-        args.task = config["task"]
-        # Apply GPU batch size if not explicitly set by user
-        if args.batch_size == 8:  # Default value, apply config
-            args.batch_size = config["batch_size"]
-        # Auto-optimize batch size for 5070 if user left default "big" batch
-        elif args.batch_size == 32:  # legacy default case
-            optimal_batch = get_optimal_batch_size(args.model, args.imgsz, gpu_type)
-            if optimal_batch != args.batch_size:
-                logging.info(f"🚀 Auto-optimized batch size: {args.batch_size} → {optimal_batch} for {args.model}")
-                args.batch_size = optimal_batch
-        # Apply GPU defaults if not explicitly set
-        if not hasattr(args, 'mixed_precision') or args.mixed_precision is None:
-            args.mixed_precision = config["mixed_precision"]
-        if not hasattr(args, 'compile') or args.compile is None:
-            args.compile = config["compile"]
-        args.yield_ms = config["yield_ms"]
-        # Apply VRAM fraction from config if not explicitly set
-        if args.vram_fraction == 0.45:  # Default value, apply config
-            args.vram_fraction = config["vram_fraction"]
-        # Apply path and API configuration
-        args.base = config["base"]
-        args.api_endpoint = config["api_endpoint"]
-        args.disable_api = config["disable_api"]
-        logging.info(f"✅ GPU config: device={config['device']}, task={config['task']}, model={config['model']}, imgsz={config['imgsz']}, batch_size={args.batch_size}, mixed_precision={config['mixed_precision']}, compile={config['compile']}, vram_fraction={args.vram_fraction}, base={config['base']}, api_endpoint={config['api_endpoint']}")
+        device = config["device"]
+        batch_size = config["batch_size"]
+        model = config["model"]
+        imgsz = config["imgsz"]
+        task = config["task"]
+        mixed_precision = config["mixed_precision"]
+        compile_model = config["compile"]
+        yield_ms = config["yield_ms"]
+        vram_fraction = config["vram_fraction"]
+        
+        # Cap VRAM early to keep system responsive
+        if torch.cuda.is_available() and vram_fraction:
+            cap_vram(fraction=vram_fraction, device_index=0)
+    
+    # Get other configuration values
+    base_path = config["base"]
+    api_endpoint = config["api_endpoint"]
+    disable_api = config["disable_api"]
+    telegram_endpoint = config["telegram_endpoint"]
+    disable_telegram = config["disable_telegram"]
+    topk = config["topk"]
+    poll = config["poll"]
+    workers = config["workers"]
+    skip_delete = config["skip_delete"]
+    once = config["once"]
+    conf = config["conf"]
+    iou = config["iou"]
+    tta = config["tta"]
+    
+    logging.info(f"✅ Configuration: device={device}, task={task}, model={model}, imgsz={imgsz}, batch_size={batch_size}, mixed_precision={mixed_precision}, compile={compile_model}, base={base_path}, api_endpoint={api_endpoint}, telegram_endpoint={telegram_endpoint}")
 
-    # Base path is already set from config above
-    base = Path(args.base).expanduser().resolve()
+    # Setup base directory
+    base = Path(base_path).expanduser().resolve()
     ensure_dirs(base)
 
-    compile_model = args.compile and not args.no_compile
-    
-    if args.task == "detect":
+    # Create model runner
+    if task == "detect":
         runner = YOLODetector(
-            weights=args.model,
-            device=args.device,
-            imgsz=args.imgsz,
-            conf=args.conf,
-            iou=args.iou,
-            batch_size=args.batch_size,
-            mixed_precision=args.mixed_precision,
+            weights=model,
+            device=device,
+            imgsz=imgsz,
+            conf=conf,
+            iou=iou,
+            batch_size=batch_size,
+            mixed_precision=mixed_precision,
             compile_model=compile_model,
-            yield_ms=args.yield_ms,
+            yield_ms=yield_ms,
         )
     else:
         runner = YOLOClassifier(
-            weights=args.model,
-            device=args.device,
-            imgsz=args.imgsz,
-            tta=args.tta,
-            batch_size=args.batch_size,
-            mixed_precision=args.mixed_precision,
+            weights=model,
+            device=device,
+            imgsz=imgsz,
+            tta=tta,
+            batch_size=batch_size,
+            mixed_precision=mixed_precision,
             compile_model=compile_model,
-            yield_ms=args.yield_ms,
+            yield_ms=yield_ms,
         )
 
-    if args.once:
-        run_once(base, runner, args.topk, workers=args.workers, batch_size=args.batch_size, skip_delete=args.skip_delete, api_endpoint=args.api_endpoint, disable_api=args.disable_api)
+    # Run processing
+    if once:
+        run_once(base, runner, topk, workers=workers, batch_size=batch_size, skip_delete=skip_delete, api_endpoint=api_endpoint, disable_api=disable_api, telegram_endpoint=telegram_endpoint, disable_telegram=disable_telegram)
     else:
-        run_once(base, runner, args.topk, workers=args.workers, batch_size=args.batch_size, skip_delete=args.skip_delete, api_endpoint=args.api_endpoint, disable_api=args.disable_api)
-        run_watch(base, runner, args.topk, args.poll, args.workers, api_endpoint=args.api_endpoint, disable_api=args.disable_api)
+        run_once(base, runner, topk, workers=workers, batch_size=batch_size, skip_delete=skip_delete, api_endpoint=api_endpoint, disable_api=disable_api, telegram_endpoint=telegram_endpoint, disable_telegram=disable_telegram)
+        run_watch(base, runner, topk, poll, workers, api_endpoint=api_endpoint, disable_api=disable_api, telegram_endpoint=telegram_endpoint, disable_telegram=disable_telegram)
 
 if __name__ == "__main__":
     main()
