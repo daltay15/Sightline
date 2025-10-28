@@ -1770,4 +1770,111 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 			"python_endpoint": pythonEndpoint,
 		})
 	})
+
+	// Detection ingestion endpoint for Python detection logic
+	r.POST("/ingest_detection", func(c *gin.Context) {
+		if telegramClient == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Telegram not configured"})
+			return
+		}
+
+		var payload map[string]interface{}
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Extract detection data from Python payload
+		detectionData := map[string]interface{}{
+			"camera_name": "Python Detection",
+			"timestamp":   time.Now().Unix(),
+			"detections":  []interface{}{},
+			"duration_ms": 0.0,
+			"conf":        0.25,
+			"iou":         0.45,
+		}
+
+		// Map Python detection data to Telegram format
+		if originalPath, ok := payload["original_path"].(string); ok {
+			// Extract camera name from path if possible
+			if strings.Contains(originalPath, "/") {
+				parts := strings.Split(originalPath, "/")
+				if len(parts) > 1 {
+					detectionData["camera_name"] = parts[len(parts)-2] // Use parent directory as camera name
+				}
+			}
+		}
+
+		if detectionDataPath, ok := payload["detection_data_path"].(map[string]interface{}); ok {
+			// Map detection results
+			if detections, ok := detectionDataPath["detections"].([]interface{}); ok {
+				detectionData["detections"] = detections
+			}
+			if duration, ok := detectionDataPath["duration_ms"].(float64); ok {
+				detectionData["duration_ms"] = duration
+			}
+			if conf, ok := detectionDataPath["conf"].(float64); ok {
+				detectionData["conf"] = conf
+			}
+			if iou, ok := detectionDataPath["iou"].(float64); ok {
+				detectionData["iou"] = iou
+			}
+		}
+
+		// Add annotated image if available
+		if annotatedPath, ok := payload["annotated_image_path"].(string); ok {
+			detectionData["annotated_image_path"] = annotatedPath
+		}
+
+		// Determine chat based on detection confidence or type
+		chat := "default"
+		if detections, ok := detectionData["detections"].([]interface{}); ok && len(detections) > 0 {
+			// Check if any detection has high confidence or is a person/vehicle
+			hasHighConfidence := false
+			hasPersonOrVehicle := false
+
+			for _, det := range detections {
+				if detMap, ok := det.(map[string]interface{}); ok {
+					if conf, ok := detMap["score"].(float64); ok && conf > 0.7 {
+						hasHighConfidence = true
+					}
+					if label, ok := detMap["label"].(string); ok {
+						labelLower := strings.ToLower(label)
+						if strings.Contains(labelLower, "person") ||
+							strings.Contains(labelLower, "car") ||
+							strings.Contains(labelLower, "truck") ||
+							strings.Contains(labelLower, "bus") ||
+							strings.Contains(labelLower, "bicycle") ||
+							strings.Contains(labelLower, "motorcycle") {
+							hasPersonOrVehicle = true
+						}
+					}
+				}
+			}
+
+			// Use security group for high confidence or person/vehicle detections
+			if hasHighConfidence || hasPersonOrVehicle {
+				chat = "security_group"
+			}
+		}
+
+		// Send detection notification via Telegram
+		if err := telegramClient.SendDetection(detectionData, chat); err != nil {
+			internal.NotifyError("error", "detection_ingest", "Failed to send detection notification", map[string]interface{}{
+				"error":   err.Error(),
+				"payload": payload,
+			})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Store detection in database if needed
+		// This could be expanded to store detection data in the events table
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success",
+			"message": "Detection notification sent",
+			"chat":    chat,
+		})
+	})
 }

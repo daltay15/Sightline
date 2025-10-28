@@ -3,3 +3,4 @@ torch>=2.1.0+cu121  # PyTorch with CUDA 12.1+ support for RTX 5070
 torchvision>=0.16.0+cu121
 opencv-python
 nvidia-ml-py3  # For GPU monitoring
+requests>=2.25.0  # For API calls

@@ -1,0 +1,6 @@
+sudo mkdir -p /mnt/z
+sudo mount -t drvfs Z: /mnt/z
+ls /mnt/z
+cd test
+source .venv/bin/activate
+python3 app.py --cpu

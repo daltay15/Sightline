@@ -23,6 +23,12 @@
   "telegram_security_chat": "",
   "error_notifications_enabled": false,
   "error_notifications_python_endpoint": "http://localhost:5000",
+  "disk_monitoring_enabled": true,
+  "disk_monitoring_interval": "5m",
+  "disk_monitoring_system_warning_threshold": 80,
+  "disk_monitoring_system_critical_threshold": 90,
+  "disk_monitoring_nas_warning_threshold": 85,
+  "disk_monitoring_nas_critical_threshold": 95,
   "created_at": 1700000000,
   "updated_at": 1700000000
 }
