@@ -351,10 +351,10 @@ func indexDetectionFile(db *sql.DB, cfg Config, p string) error {
 	}
 
 	// Send Telegram notification if person detected
-	if err := sendTelegramNotificationIfPersonDetected(db, cfg, jsonPath, p, eventID); err != nil {
-		log.Printf("Failed to send Telegram notification for event %d: %v", eventID, err)
-		// Don't fail the indexing if Telegram fails
-	}
+	// if err := sendTelegramNotificationIfPersonDetected(db, cfg, jsonPath, p, eventID); err != nil {
+	// 	log.Printf("Failed to send Telegram notification for event %d: %v", eventID, err)
+	// 	// Don't fail the indexing if Telegram fails
+	// }
 
 	return nil
 }

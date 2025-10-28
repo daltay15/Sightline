@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -1585,32 +1586,6 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 		c.JSON(200, gin.H{"status": "success"})
 	})
 
-	// Send detection endpoint
-	r.POST("/telegram/send_detection", func(c *gin.Context) {
-		if telegramClient == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Telegram not configured"})
-			return
-		}
-
-		var payload map[string]interface{}
-		if err := c.ShouldBindJSON(&payload); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		chat := ""
-		if chatVal, ok := payload["chat"].(string); ok {
-			chat = chatVal
-		}
-
-		if err := telegramClient.SendDetection(payload, chat); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		c.JSON(200, gin.H{"status": "success"})
-	})
-
 	// Health check endpoint
 	r.GET("/telegram/health", func(c *gin.Context) {
 		if telegramClient == nil {
@@ -1876,5 +1851,28 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 			"message": "Detection notification sent",
 			"chat":    chat,
 		})
+	})
+
+	// Send telegram detection endpoint
+	r.POST("/telegram/send_detection", func(c *gin.Context) {
+		log.Printf("Received Telegram detection request: %v", c.Request.Body)
+		if telegramClient == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Telegram not configured"})
+			return
+		}
+
+		var payload map[string]interface{}
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := telegramClient.SendDetection(payload, "security_group"); err != nil {
+			log.Printf("Failed to send Telegram notification: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": "success"})
 	})
 }
