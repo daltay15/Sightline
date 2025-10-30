@@ -521,8 +521,7 @@ def send_detection_to_telegram(detection_result: DetectionResult, original_path:
                 person_detections.append(detection)
         
         if not has_person:
-            logging.info("No person detected, skipping Telegram alert")
-            return True  # Not an error, just no alert needed
+            return True 
         
         # Read and encode the annotated image (same logic as Go code)
         image_b64 = ""
@@ -537,7 +536,6 @@ def send_detection_to_telegram(detection_result: DetectionResult, original_path:
             except Exception as e:
                 logging.warning(f"Failed to read annotated image {detection_result.annotated_path}: {e}")
         
-        # Format payload for Telegram endpoint (same structure as Go code)
         payload = {
             "camera_name": camera_name,
             "timestamp": int(time.time()),
@@ -553,7 +551,7 @@ def send_detection_to_telegram(detection_result: DetectionResult, original_path:
         elif detection_result.annotated_path:
             payload["annotated_image_path"] = detection_result.annotated_path
         
-        logging.info(f"Sending detection alert to Telegram: {payload}")
+        logging.info(f"Sending detection alert to Telegram")
         response = requests.post(telegram_endpoint, json=payload, timeout=30)
         logging.info(f"Telegram response: {response}")
         
@@ -667,17 +665,14 @@ def process_one(img_in_pending: Path, base: Path, runner, topk: int, api_endpoin
 
         if isinstance(runner, YOLODetector):
             det = runner.detect(processing_path)
-            logging.info(f"Detection result: {det}")
-            # Send Telegram alert immediately after detection (ASAP alerting)
             if not disable_telegram and telegram_endpoint:
-                logging.info(f"Sending Telegram alert to: {telegram_endpoint}")
                 telegram_success = send_detection_to_telegram(
                     detection_result=det,
                     original_path=str(processing_path),
                     telegram_endpoint=telegram_endpoint
                 )
                 if telegram_success:
-                    logging.info("🚨 Telegram alert sent immediately for detection")
+                    logging.info("🚨 Telegram alert sent")
                 else:
                     logging.error("❌ Telegram alert failed")
             else:
@@ -813,7 +808,6 @@ def process_batch(batch_imgs: List[Path], base: Path, runner, topk: int, skip_de
                 
                 # Send Telegram alert immediately after detection (ASAP alerting)
                 if not disable_telegram and telegram_endpoint:
-                    logging.info(f"Sending Telegram alert to: {telegram_endpoint}")
                     telegram_success = send_detection_to_telegram(
                         detection_result=det,
                         original_path=str(processing_path),
