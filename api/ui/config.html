@@ -648,6 +648,67 @@
             </div>
         </div>
         
+        <!-- Data Retention / Deletion -->
+        <div class="config-section">
+            <h2>🧹 Data Retention & Deletion</h2>
+            <div id="dateStatsSummary" class="alert info" style="display:none;"></div>
+            
+            <!-- Automatic Retention Policy -->
+            <div style="margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                <h3 style="margin-top:0; margin-bottom:12px;">⏰ Automatic Data Retention</h3>
+                <div class="config-grid">
+                    <div class="config-item">
+                        <label for="retentionEnabled">Enable Auto Retention</label>
+                        <select id="retentionEnabled">
+                            <option value="false">Disabled</option>
+                            <option value="true">Enabled</option>
+                        </select>
+                        <div class="help-text">Automatically delete data older than the retention period (runs nightly at 2 AM)</div>
+                    </div>
+                    <div class="config-item">
+                        <label for="retentionUnit">Retention Period</label>
+                        <select id="retentionUnit">
+                            <option value="day">Day(s)</option>
+                            <option value="week">Week(s)</option>
+                            <option value="month">Month(s)</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <label for="retentionAmount">Keep Last</label>
+                        <input type="number" id="retentionAmount" min="1" value="30">
+                        <div class="help-text">Number of periods to keep (e.g., 30 days = keep last 30 days, delete older)</div>
+                    </div>
+                </div>
+            </div>
+            
+            <h3 style="margin-top: 0;">Manual Deletion</h3>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="deleteUnit">Delete Period</label>
+                    <select id="deleteUnit">
+                        <option value="day">Day(s)</option>
+                        <option value="week">Week(s)</option>
+                        <option value="month">Month(s)</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label for="deleteAmount">Amount</label>
+                    <input type="number" id="deleteAmount" min="1" value="1">
+                </div>
+                <div class="config-item">
+                    <label for="deleteEnd">Date to Delete (optional)</label>
+                    <input type="date" id="deleteEnd">
+                    <div class="help-text">Select a specific day to delete. If empty, uses now as the end of the deletion range.</div>
+                </div>
+            </div>
+            <div class="button-group" id="quickDeleteButtons" style="margin-top:12px; flex-wrap:wrap;"></div>
+            <div class="button-group">
+                <button id="previewDelete" class="secondary">🔍 Preview Deletion</button>
+                <button id="executeDelete" class="danger">🗑️ Delete Data</button>
+            </div>
+            <div class="test-results" id="deleteResults"></div>
+        </div>
+        
         <!-- Backup Configuration -->
         <div class="config-section">
             <h2>💾 Database Backup</h2>
@@ -819,6 +880,7 @@
             });
             
             loadConfiguration();
+            loadDateStats();
         });
         
         // Load configuration from server
@@ -836,6 +898,86 @@
                 console.error('Error loading configuration:', error);
                 showStatus('Error loading configuration: ' + error.message, 'error');
             }
+        }
+
+        // Load date statistics to power quick actions
+        async function loadDateStats() {
+            try {
+                const res = await fetch('/data/date-stats');
+                if (!res.ok) return; 
+                const stats = await res.json();
+                const box = document.getElementById('dateStatsSummary');
+                if (stats.minStartTs && stats.maxStartTs) {
+                    const min = new Date(stats.minStartTs * 1000);
+                    const max = new Date(stats.maxStartTs * 1000);
+                    const days = Math.max(1, Math.ceil((max - min) / (1000*60*60*24)));
+                    box.style.display = 'flex';
+                    box.innerHTML = `<span>📆</span><div><strong>Data Range:</strong> ${min.toISOString().slice(0,10)} → ${max.toISOString().slice(0,10)} (${days} days). Total events: ${stats.totalEvents}</div>`;
+                    
+                    // Use the oldest date from daily array (first entry, sorted ASC) for more accurate oldest day
+                    let oldestDayWithEvents = min;
+                    if (stats.daily && stats.daily.length > 0 && stats.daily[0].date) {
+                        // Parse YYYY-MM-DD format
+                        const oldestDateStr = stats.daily[0].date;
+                        const parts = oldestDateStr.split('-');
+                        if (parts.length === 3) {
+                            oldestDayWithEvents = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                        }
+                    }
+                    renderQuickButtons(oldestDayWithEvents, max, stats.daily || []);
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        function renderQuickButtons(minDate, maxDate, dailyArray) {
+            const holder = document.getElementById('quickDeleteButtons');
+            holder.innerHTML = '';
+            const mkBtn = (label, handler, danger=false) => {
+                const b = document.createElement('button');
+                b.textContent = label;
+                if (danger) b.classList.add('danger'); else b.classList.add('secondary');
+                b.style.whiteSpace = 'nowrap';
+                b.addEventListener('click', handler);
+                holder.appendChild(b);
+            };
+
+            // Helpers to set unit/amount/end
+            function setAndPreview(unit, amount, endDate) {
+                document.getElementById('deleteUnit').value = unit;
+                document.getElementById('deleteAmount').value = amount;
+                if (endDate) {
+                    // Format as YYYY-MM-DD for date input
+                    const year = endDate.getFullYear();
+                    const month = String(endDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(endDate.getDate()).padStart(2, '0');
+                    document.getElementById('deleteEnd').value = `${year}-${month}-${day}`;
+                } else {
+                    document.getElementById('deleteEnd').value = '';
+                }
+                document.getElementById('previewDelete').click();
+            }
+
+            // Oldest slice buttons - use minDate which should be the oldest day with actual events
+            mkBtn('Oldest 1 Day', () => {
+                // Use the oldest day directly - the date conversion will handle sending the correct end time
+                setAndPreview('day', 1, minDate);
+            });
+            mkBtn('Oldest 1 Week', () => {
+                const end = new Date(minDate.getTime() + 7*24*60*60*1000);
+                setAndPreview('week', 1, end);
+            });
+            mkBtn('Oldest 1 Month', () => {
+                const end = new Date(minDate);
+                end.setMonth(end.getMonth() + 1);
+                setAndPreview('month', 1, end);
+            });
+
+            // Most recent slice buttons (end = now)
+            mkBtn('Most Recent 1 Day', () => setAndPreview('day', 1, undefined));
+            mkBtn('Most Recent 1 Week', () => setAndPreview('week', 1, undefined));
+            mkBtn('Most Recent 1 Month', () => setAndPreview('month', 1, undefined));
         }
         
         // Populate form with configuration values
@@ -881,6 +1023,11 @@
             // Error Notifications
             document.getElementById('errorNotificationsEnabled').value = config.error_notifications_enabled ? 'true' : 'false';
             document.getElementById('errorNotificationsPythonEndpoint').value = config.error_notifications_python_endpoint || 'http://localhost:5000';
+            
+            // Data Retention
+            document.getElementById('retentionEnabled').value = config.retention_enabled ? 'true' : 'false';
+            document.getElementById('retentionUnit').value = config.retention_unit || 'day';
+            document.getElementById('retentionAmount').value = config.retention_amount || 30;
         }
         
         // Collect form data
@@ -911,7 +1058,10 @@
                 telegram_default_chat: document.getElementById('telegramDefaultChat').value,
                 telegram_security_chat: document.getElementById('telegramSecurityChat').value,
                 error_notifications_enabled: document.getElementById('errorNotificationsEnabled').value === 'true',
-                error_notifications_python_endpoint: document.getElementById('errorNotificationsPythonEndpoint').value
+                error_notifications_python_endpoint: document.getElementById('errorNotificationsPythonEndpoint').value,
+                retention_enabled: document.getElementById('retentionEnabled').value === 'true',
+                retention_unit: document.getElementById('retentionUnit').value,
+                retention_amount: parseInt(document.getElementById('retentionAmount').value || '30')
             };
         }
         
@@ -1021,6 +1171,124 @@
                 console.error('Error testing Telegram:', error);
                 testOutput.textContent = `❌ Error testing Telegram: ${error.message}`;
                 showStatus('Error testing Telegram: ' + error.message, 'error');
+            }
+        });
+
+        // Preview deletion
+        document.getElementById('previewDelete').addEventListener('click', async function() {
+            const unit = document.getElementById('deleteUnit').value;
+            const amount = parseInt(document.getElementById('deleteAmount').value || '1');
+            const endDateStr = document.getElementById('deleteEnd').value;
+            let endISO = undefined;
+            if (endDateStr) {
+                // Convert date picker value (YYYY-MM-DD) to ISO8601
+                // Parse the date string directly to avoid timezone issues
+                const parts = endDateStr.split('-');
+                if (parts.length === 3) {
+                    // Send the selected date at midnight UTC as a marker
+                    // Backend will interpret this and calculate the proper range in local timezone
+                    const year = parseInt(parts[0]);
+                    const month = parseInt(parts[1]);
+                    const day = parseInt(parts[2]);
+                    // Create date at start of selected day in UTC (marker date)
+                    const selectedDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+                    endISO = selectedDate.toISOString();
+                }
+            }
+            const out = document.getElementById('deleteResults');
+            out.className = 'test-results show';
+            out.innerHTML = '<h4>🔍 Previewing...</h4><pre>Calculating day folders to delete...</pre>';
+            try {
+                const resp = await fetch('/delete/range', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ unit, amount, end: endISO, preview: true })
+                });
+                const res = await resp.json();
+                if (resp.ok) {
+                    out.className = 'test-results show success';
+                    let msg = `Will delete ${res.dayFolders || 0} day folder(s) containing ${res.baseEvents || 0} events`;
+                    if (res.totalSize) {
+                        msg += ` (${res.totalSize})`;
+                    }
+                    if (res.detectionEvents > 0) {
+                        msg += ` and ${res.detectionEvents} detection events`;
+                    }
+                    msg += `\n\nSample folders:\n`;
+                    if (res.sampleFolders && res.sampleFolders.length > 0) {
+                        res.sampleFolders.forEach(f => msg += `  • ${f}\n`);
+                    } else {
+                        msg += `  (none found)\n`;
+                    }
+                    out.innerHTML = `<h4>✅ Preview</h4><pre>${msg}</pre>`;
+                } else {
+                    out.className = 'test-results show error';
+                    out.innerHTML = `<h4>❌ Error</h4><pre>${JSON.stringify(res, null, 2)}</pre>`;
+                }
+            } catch (e) {
+                out.className = 'test-results show error';
+                out.innerHTML = `<h4>❌ Error</h4><pre>${e.message}</pre>`;
+            }
+        });
+
+        // Execute deletion
+        document.getElementById('executeDelete').addEventListener('click', async function() {
+            if (!confirm('This will permanently delete entire day folders and database records in the selected period. Continue?')) return;
+            const unit = document.getElementById('deleteUnit').value;
+            const amount = parseInt(document.getElementById('deleteAmount').value || '1');
+            const endDateStr = document.getElementById('deleteEnd').value;
+            let endISO = undefined;
+            if (endDateStr) {
+                // Convert date picker value (YYYY-MM-DD) to ISO8601
+                // Parse the date string directly to avoid timezone issues
+                const parts = endDateStr.split('-');
+                if (parts.length === 3) {
+                    // Send the selected date at midnight UTC as a marker
+                    // Backend will interpret this and calculate the proper range in local timezone
+                    const year = parseInt(parts[0]);
+                    const month = parseInt(parts[1]);
+                    const day = parseInt(parts[2]);
+                    // Create date at start of selected day in UTC (marker date)
+                    const selectedDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+                    endISO = selectedDate.toISOString();
+                }
+            }
+            const out = document.getElementById('deleteResults');
+            out.className = 'test-results show';
+            out.innerHTML = '<h4>🗑️ Deleting...</h4><pre>Deleting day folders and records...</pre>';
+            try {
+                const resp = await fetch('/delete/range', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ unit, amount, end: endISO, preview: false })
+                });
+                const res = await resp.json();
+                if (resp.ok) {
+                    out.className = 'test-results show success';
+                    let msg = `Successfully deleted:\n`;
+                    msg += `  • ${res.deletedFolders || 0} day folder(s)\n`;
+                    if (res.deletedMonthFolders > 0) {
+                        msg += `  • ${res.deletedMonthFolders} empty month folder(s)\n`;
+                    }
+                    msg += `  • ${res.deletedBaseEvents || 0} base events\n`;
+                    if (res.deletedDetections > 0) {
+                        msg += `  • ${res.deletedDetections} detection events\n`;
+                    }
+                    if (res.cleanedDetections > 0) {
+                        msg += `  • ${res.cleanedDetections} detection artifacts cleaned\n`;
+                    }
+                    if (res.failedSamples && res.failedSamples.length > 0) {
+                        msg += `\n⚠️ ${res.failedSamples.length} folder(s) failed to delete:\n`;
+                        res.failedSamples.forEach(f => msg += `  • ${f.path}: ${f.error}\n`);
+                    }
+                    out.innerHTML = `<h4>✅ Deleted</h4><pre>${msg}</pre>`;
+                } else {
+                    out.className = 'test-results show error';
+                    out.innerHTML = `<h4>❌ Error</h4><pre>${JSON.stringify(res, null, 2)}</pre>`;
+                }
+            } catch (e) {
+                out.className = 'test-results show error';
+                out.innerHTML = `<h4>❌ Error</h4><pre>${e.message}</pre>`;
             }
         });
         

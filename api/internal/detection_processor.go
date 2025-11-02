@@ -150,6 +150,11 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 	// Read the JSON file
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
+		// If file doesn't exist, it was likely deleted - log as info and skip
+		if os.IsNotExist(err) {
+			dp.logger.Printf("Detection file deleted, skipping: %s", jsonPath)
+			return nil // Not an error - file was intentionally deleted
+		}
 		dp.logger.Printf("Failed to read JSON file %s: %v", jsonPath, err)
 		return fmt.Errorf("failed to read JSON file: %w", err)
 	}
@@ -169,10 +174,15 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 		return fmt.Errorf("failed to extract event ID from filename: %w", err)
 	}
 
-	// Verify the event exists in the database
+	// Verify the event exists in the database. If missing, clean up orphan JSON and skip.
 	if err := dp.verifyEventExists(eventID); err != nil {
-		dp.logger.Printf("Event ID %d does not exist in database: %v", eventID, err)
-		return fmt.Errorf("event ID %d does not exist: %w", eventID, err)
+		dp.logger.Printf("Event ID %d does not exist in database, cleaning up orphan detection JSON: %v", eventID, err)
+		// Remove the JSON file and best-effort remove its sibling annotated image
+		_ = os.Remove(jsonPath)
+		// If an annotated image exists with same stem, remove it
+		imgGuess := strings.TrimSuffix(jsonPath, ".json") + ".jpg"
+		_ = os.Remove(imgGuess)
+		return nil
 	}
 
 	// Check if this event already has detection data to prevent duplicates
