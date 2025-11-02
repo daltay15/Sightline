@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,25 @@ const (
 	defaultLimit = 100
 	maxLimit     = 500
 )
+
+// formatBytes formats bytes into human-readable format (e.g., "30.03 GB")
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	size := float64(bytes) / float64(div)
+	units := []string{"KB", "MB", "GB", "TB", "PB"}
+	if exp >= len(units) {
+		return fmt.Sprintf("%.2f PB", float64(bytes)/float64(div*unit))
+	}
+	return fmt.Sprintf("%.2f %s", size, units[exp])
+}
 
 // PreparedStatements holds cached prepared statements for better performance
 type PreparedStatements struct {
@@ -414,6 +434,312 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 		c.Status(http.StatusNoContent)
 	})
 
+	// Delete data by date range (day/week/month or explicit range)
+	r.POST("/delete/range", func(c *gin.Context) {
+		// Payload supports either explicit from/to (unix seconds) or a relative period
+		var payload struct {
+			From       *int64  `json:"from,omitempty"`
+			To         *int64  `json:"to,omitempty"`
+			Unit       string  `json:"unit,omitempty"`    // "day", "week", "month"
+			Amount     int     `json:"amount,omitempty"`  // how many units to delete
+			EndISO8601 *string `json:"end,omitempty"`     // optional ISO8601 end date for relative window
+			Preview    bool    `json:"preview,omitempty"` // if true, don't delete, just return counts
+		}
+
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Compute range
+		var fromTs, toTs int64
+		if payload.From != nil && payload.To != nil {
+			fromTs = *payload.From
+			toTs = *payload.To
+		} else {
+			// Relative window based on unit/amount
+			if payload.Amount <= 0 {
+				payload.Amount = 1
+			}
+			end := time.Now()
+			hasExplicitEnd := false
+			if payload.EndISO8601 != nil && *payload.EndISO8601 != "" {
+				if t, err := time.Parse(time.RFC3339, *payload.EndISO8601); err == nil {
+					end = t
+					hasExplicitEnd = true
+				}
+			}
+			start := end
+			switch strings.ToLower(payload.Unit) {
+			case "day", "days":
+				if hasExplicitEnd && payload.Amount == 1 {
+					// When deleting a specific day, the end date is the selected date at midnight UTC
+					// Extract the date components from UTC (the date the user actually selected)
+					year, month, day := end.UTC().Date()
+					// Create start as beginning of selected day in local timezone
+					start = time.Date(year, month, day, 0, 0, 0, 0, time.Local)
+					// Create end as last second of selected day (23:59:59) to make it exclusive of next day
+					end = time.Date(year, month, day, 23, 59, 59, 999999999, time.Local)
+				} else {
+					start = end.AddDate(0, 0, -payload.Amount)
+				}
+			case "week", "weeks":
+				start = end.AddDate(0, 0, -7*payload.Amount)
+			case "month", "months":
+				start = end.AddDate(0, -payload.Amount, 0)
+			default:
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Provide from/to or a valid unit: day|week|month"})
+				return
+			}
+			fromTs = start.Unix()
+			toTs = end.Unix()
+		}
+
+		// Collect base event candidates (exclude detection pseudo-camera rows)
+		rows, err := db.Query(`
+			SELECT id, path, COALESCE(jpg_path,''), COALESCE(sheet_path,''), COALESCE(video_path,''), COALESCE(detection_path,''), COALESCE(size_bytes, 0)
+			FROM events
+			WHERE start_ts >= ? AND start_ts <= ? AND camera != 'DETECTION'
+		`, fromTs, toTs)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		type evt struct {
+			id        int64
+			p1        string
+			p2        string
+			p3        string
+			p4        string
+			p5        string
+			sizeBytes int64
+		}
+
+		var baseEvents []evt
+		var totalSizeBytes int64
+		for rows.Next() {
+			var e evt
+			if err := rows.Scan(&e.id, &e.p1, &e.p2, &e.p3, &e.p4, &e.p5, &e.sizeBytes); err != nil {
+				continue
+			}
+			baseEvents = append(baseEvents, e)
+			totalSizeBytes += e.sizeBytes
+		}
+
+		// Build list of IDs for deletion (base events)
+		ids := make([]int64, 0, len(baseEvents))
+		for _, e := range baseEvents {
+			ids = append(ids, e.id)
+		}
+
+		// Also collect related detection events for these base events
+		var detectionEventIDs []int64
+		if len(ids) > 0 {
+			// Prefer explicit relation via original_event_id if present, else via tags pattern
+			placeholders := strings.Repeat("?,", len(ids)-1) + "?"
+			args := make([]any, len(ids))
+			for i, id := range ids {
+				args[i] = id
+			}
+			detRows, err := db.Query(`
+				SELECT id FROM events WHERE camera='DETECTION' AND original_event_id IN (`+placeholders+`)
+			`, args...)
+			if err == nil {
+				for detRows.Next() {
+					var did int64
+					if err := detRows.Scan(&did); err == nil {
+						detectionEventIDs = append(detectionEventIDs, did)
+					}
+				}
+				detRows.Close()
+			}
+			// Fallback via tags if original_event_id relation is not used
+			if len(detectionEventIDs) == 0 {
+				var tagArgs []any
+				var tagConds []string
+				for _, id := range ids {
+					tagConds = append(tagConds, "tags LIKE ?")
+					tagArgs = append(tagArgs, fmt.Sprintf("%%detection_for_event_%d%%", id))
+				}
+				q := "SELECT id FROM events WHERE camera='DETECTION' AND (" + strings.Join(tagConds, " OR ") + ")"
+				detRows2, err2 := db.Query(q, tagArgs...)
+				if err2 == nil {
+					for detRows2.Next() {
+						var did int64
+						if err := detRows2.Scan(&did); err == nil {
+							detectionEventIDs = append(detectionEventIDs, did)
+						}
+					}
+					detRows2.Close()
+				}
+			}
+		}
+
+		// Group events by day folder for efficient deletion
+		dayFolders := make(map[string]bool) // track unique day folders
+		for _, e := range baseEvents {
+			if e.p1 != "" {
+				// Extract day folder: parent directory of the file
+				dayFolder := filepath.Dir(e.p1)
+				dayFolders[dayFolder] = true
+			}
+		}
+
+		if payload.Preview {
+			// Provide a list of day folders that would be deleted
+			sampleFolders := make([]string, 0, len(dayFolders))
+			for folder := range dayFolders {
+				sampleFolders = append(sampleFolders, folder)
+			}
+			// Sort for consistent output
+			sort.Strings(sampleFolders)
+			// Limit to first 10 for preview
+			if len(sampleFolders) > 10 {
+				sampleFolders = sampleFolders[:10]
+			}
+			c.JSON(200, gin.H{
+				"baseEvents":      len(baseEvents),
+				"detectionEvents": len(detectionEventIDs),
+				"dayFolders":      len(dayFolders),
+				"sampleFolders":   sampleFolders,
+				"totalSizeBytes":  totalSizeBytes,
+				"totalSize":       formatBytes(totalSizeBytes),
+			})
+			return
+		}
+
+		// Delete entire day folders instead of individual files
+		deletedFolders := 0
+		attemptedFolders := 0
+		var failedSamples []map[string]string
+		// Track month folders that may become empty after deletion
+		monthFolders := make(map[string]bool)
+		for dayFolder := range dayFolders {
+			if dayFolder == "" {
+				continue
+			}
+			// Extract month folder (parent of day folder)
+			monthFolder := filepath.Dir(dayFolder)
+			if monthFolder != "" && monthFolder != dayFolder {
+				monthFolders[monthFolder] = true
+			}
+			attemptedFolders++
+			if err := os.RemoveAll(dayFolder); err == nil || os.IsNotExist(err) {
+				deletedFolders++
+				log.Printf("Deleted day folder: %s", dayFolder)
+			} else {
+				if len(failedSamples) < 10 {
+					failedSamples = append(failedSamples, map[string]string{"path": dayFolder, "error": err.Error()})
+				}
+				log.Printf("Delete failed: %s (%v)", dayFolder, err)
+			}
+		}
+
+		// After deleting day folders, check and delete empty month folders
+		deletedMonthFolders := 0
+		for monthFolder := range monthFolders {
+			// Check if month folder is empty
+			entries, err := os.ReadDir(monthFolder)
+			if err != nil {
+				// If we can't read it, it might not exist or we don't have permission - skip
+				continue
+			}
+			// If folder is empty, delete it
+			if len(entries) == 0 {
+				if err := os.Remove(monthFolder); err == nil || os.IsNotExist(err) {
+					deletedMonthFolders++
+					log.Printf("Deleted empty month folder: %s", monthFolder)
+				} else {
+					log.Printf("Failed to delete empty month folder %s: %v", monthFolder, err)
+				}
+			}
+		}
+
+		// Best-effort: also remove GPU completed artifacts for each base event (image+json)
+		// These are in a different directory, so read it once and batch delete matching files
+		cleanedDetections := 0
+		if len(ids) > 0 {
+			completedDir := config.CompletedDir
+			// Build a set of prefixes to match (eventID__)
+			prefixMap := make(map[string]bool, len(ids))
+			for _, id := range ids {
+				prefixMap[fmt.Sprintf("%d__", id)] = true
+			}
+
+			// Read directory once
+			entries, err := os.ReadDir(completedDir)
+			if err == nil {
+				var filesToDelete []string
+				// Collect all matching files in one pass
+				for _, e := range entries {
+					name := e.Name()
+					// Extract event ID from filename (format: {eventID}__{rest})
+					if idx := strings.Index(name, "__"); idx > 0 {
+						prefix := name[:idx+2] // Include the "__"
+						// Check if this prefix matches any of our event IDs
+						if prefixMap[prefix] {
+							// Check if it's a detection file (ends with _det.jpg/_det.jpeg) or .json
+							lowerName := strings.ToLower(name)
+							if strings.HasSuffix(lowerName, "_det.jpg") ||
+								strings.HasSuffix(lowerName, "_det.jpeg") ||
+								strings.HasSuffix(lowerName, ".json") {
+								filesToDelete = append(filesToDelete, filepath.Join(completedDir, name))
+							}
+						}
+					}
+				}
+
+				// Delete all collected files
+				for _, filePath := range filesToDelete {
+					if err := os.Remove(filePath); err == nil || os.IsNotExist(err) {
+						cleanedDetections++
+					}
+				}
+			}
+		}
+
+		// Build combined list of all event IDs to delete records for
+		allIDs := append([]int64{}, ids...)
+		allIDs = append(allIDs, detectionEventIDs...)
+		if len(allIDs) == 0 {
+			c.JSON(200, gin.H{
+				"deletedFolders":      deletedFolders,
+				"deletedMonthFolders": deletedMonthFolders,
+				"deletedEvents":       0,
+				"deletedDetections":   0,
+				"cleanedDetections":   cleanedDetections,
+			})
+			return
+		}
+
+		// Delete detections rows first
+		placeholders := strings.Repeat("?,", len(allIDs)-1) + "?"
+		args := make([]any, len(allIDs))
+		for i, id := range allIDs {
+			args[i] = id
+		}
+		_, _ = db.Exec("DELETE FROM detections WHERE event_id IN ("+placeholders+")", args...)
+
+		// Delete events rows
+		_, err = db.Exec("DELETE FROM events WHERE id IN ("+placeholders+")", args...)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"deletedFolders":      deletedFolders,
+			"deletedMonthFolders": deletedMonthFolders,
+			"attemptedFolders":    attemptedFolders,
+			"deletedBaseEvents":   len(ids),
+			"deletedDetections":   len(detectionEventIDs),
+			"cleanedDetections":   cleanedDetections,
+			"failedSamples":       failedSamples,
+		})
+	})
+
 	// Motion detection stats endpoint
 	r.GET("/stats/motion", func(c *gin.Context) {
 		days := c.DefaultQuery("days", "30")
@@ -558,6 +884,77 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 			"period":      daysInt,
 			"camera":      camera,
 		})
+	})
+
+	// Date stats for dynamic deletion UI
+	r.GET("/data/date-stats", func(c *gin.Context) {
+		// min/max start_ts for non-detection base events
+		var minTs, maxTs sql.NullInt64
+		if err := db.QueryRow("SELECT MIN(start_ts) FROM events WHERE camera != 'DETECTION'").Scan(&minTs); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := db.QueryRow("SELECT MAX(start_ts) FROM events WHERE camera != 'DETECTION'").Scan(&maxTs); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		// total events
+		var total int64
+		_ = db.QueryRow("SELECT COUNT(*) FROM events WHERE camera != 'DETECTION'").Scan(&total)
+
+		// daily buckets (date string + count)
+		daily := make([]map[string]any, 0, 90)
+		rows, err := db.Query(`
+			SELECT DATE(datetime(start_ts,'unixepoch')) as d, COUNT(*)
+			FROM events WHERE camera != 'DETECTION'
+			GROUP BY d ORDER BY d ASC`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var d string
+				var c int64
+				if err := rows.Scan(&d, &c); err == nil {
+					daily = append(daily, map[string]any{"date": d, "count": c})
+				}
+			}
+		}
+
+		// monthly buckets (YYYY-MM + count)
+		monthly := make([]map[string]any, 0, 24)
+		mrows, err := db.Query(`
+			SELECT strftime('%Y-%m', datetime(start_ts,'unixepoch')) as ym, COUNT(*)
+			FROM events WHERE camera != 'DETECTION'
+			GROUP BY ym ORDER BY ym ASC`)
+		if err == nil {
+			defer mrows.Close()
+			for mrows.Next() {
+				var ym string
+				var c int64
+				if err := mrows.Scan(&ym, &c); err == nil {
+					monthly = append(monthly, map[string]any{"month": ym, "count": c})
+				}
+			}
+		}
+
+		resp := gin.H{
+			"minStartTs": func() any {
+				if minTs.Valid {
+					return minTs.Int64
+				}
+				return nil
+			}(),
+			"maxStartTs": func() any {
+				if maxTs.Valid {
+					return maxTs.Int64
+				}
+				return nil
+			}(),
+			"totalEvents": total,
+			"daily":       daily,
+			"monthly":     monthly,
+		}
+		c.JSON(200, resp)
 	})
 
 	// Database cleanup endpoint for deleted files
@@ -1842,9 +2239,6 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		// Store detection in database if needed
-		// This could be expanded to store detection data in the events table
 
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "success",

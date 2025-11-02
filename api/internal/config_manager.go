@@ -133,6 +133,9 @@ func (cm *ConfigManager) setDefaults() {
 		"telegram_token":         "",
 		"telegram_default_chat":  "",
 		"telegram_security_chat": "",
+		"retention_enabled":      false,
+		"retention_unit":         "day",
+		"retention_amount":       30,
 		"created_at":             time.Now().Unix(),
 		"updated_at":             time.Now().Unix(),
 	}
@@ -163,6 +166,9 @@ func (cm *ConfigManager) mergeWithDefaults() {
 		"telegram_token":         "",
 		"telegram_default_chat":  "",
 		"telegram_security_chat": "",
+		"retention_enabled":      false,
+		"retention_unit":         "day",
+		"retention_amount":       30,
 	}
 
 	// Add missing keys from defaults

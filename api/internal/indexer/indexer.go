@@ -269,6 +269,10 @@ func ProcessSingleFile(db *sql.DB, cfg Config, filePath string) error {
 func indexDetectionFile(db *sql.DB, cfg Config, p string) error {
 	info, err := os.Stat(p)
 	if err != nil {
+		// If file doesn't exist, it was likely deleted - skip silently
+		if os.IsNotExist(err) {
+			return nil // Not an error - file was intentionally deleted
+		}
 		return err
 	}
 
@@ -298,11 +302,17 @@ func indexDetectionFile(db *sql.DB, cfg Config, p string) error {
 		return fmt.Errorf("invalid event ID: %s", eventIDStr)
 	}
 
-	// Check if the original event exists
+	// Check if the original event exists; if not, clean up orphan detection assets and skip
 	var originalEventID int64
 	err = db.QueryRow("SELECT id FROM events WHERE id = ?", eventID).Scan(&originalEventID)
 	if err != nil {
-		return fmt.Errorf("original event %d not found", eventID)
+		log.Printf("Error indexing detection file %s: original event %d not found, cleaning up orphan file", p, eventID)
+		// Best-effort removal of orphan detection image and its JSON (if present)
+		_ = os.Remove(p)
+		// Try to remove paired JSON next to this detection image
+		jsonGuess := strings.TrimSuffix(p, detSuffix) + ".json"
+		_ = os.Remove(jsonGuess)
+		return nil
 	}
 
 	// Check if the corresponding JSON file has actual detections
@@ -843,7 +853,7 @@ func sendTelegramNotificationIfPersonDetected(db *sql.DB, cfg Config, jsonPath, 
 	}
 
 	if !hasPerson {
-		return nil // No person detected, no notification needed
+		return nil
 	}
 
 	// Get camera name from the original event

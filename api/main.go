@@ -180,6 +180,10 @@ func main() {
 		log.Printf("Warning: Failed to create detection indexes: %v", err)
 	}
 
+	// Initialize retention manager (after DB is ready)
+	retentionManager := internal.NewRetentionManager(db, configManager)
+	retentionManager.UpdateSettings()
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
@@ -648,12 +652,21 @@ func main() {
 			return
 		}
 
+		// Reload config so other services can pick up changes
+		if err := configManager.LoadConfig(); err != nil {
+			log.Printf("Warning: Failed to reload config after save: %v", err)
+		}
+
 		// Update backup manager with new settings if they changed
 		if backupEnabled, ok := newConfig["db_backup_enabled"].(bool); ok {
 			if backupInterval, ok := newConfig["db_backup_interval"].(string); ok {
 				backupManager.UpdateSettings(backupEnabled, backupInterval)
 			}
 		}
+
+		// Update retention manager with new settings (will take effect on next scheduled run)
+		// The retention manager checks settings before each run, so it will pick up changes
+		log.Printf("Configuration saved. Retention settings will take effect on next scheduled run (nightly at 2 AM)")
 
 		c.JSON(200, gin.H{"message": "Configuration saved successfully"})
 	})
@@ -954,6 +967,9 @@ func main() {
 	// Disk space monitoring
 	diskMonitor := internal.NewDiskMonitor(configManager.GetConfig())
 	diskMonitor.Start()
+
+	// Start the retention manager (always start, regardless of file watcher status)
+	retentionManager.StartRetentionScheduler()
 
 	log.Printf("All goroutines started, entering select loop")
 	select {}
