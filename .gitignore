@@ -34,5 +34,4 @@ api/scui-api
 Security-Camera-UI/
 api/scui-api-fixed
 api/config.json
-api/config.json
-api/config.json
+*.json
