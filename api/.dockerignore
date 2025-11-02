@@ -1,0 +1,36 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+scui
+scui-api
+
+# Test files
+*_test.go
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Data directories (will be mounted as volumes)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Build artifacts
+*.a
+dist/
+
