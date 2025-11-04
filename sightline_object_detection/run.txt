@@ -2,5 +2,6 @@ sudo mkdir -p /mnt/z
 sudo mount -t drvfs Z: /mnt/z
 ls /mnt/z
 cd test
+python3 -m venv .venv
 source .venv/bin/activate
 python3 app.py --cpu

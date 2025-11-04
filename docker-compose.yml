@@ -1,0 +1,53 @@
+services:
+  python-detection:
+    build:
+      context: ./sightline_object_detection
+      dockerfile: Dockerfile
+    container_name: scui-python-detection
+    volumes:
+      - ./data/object_detection:/media/nas/cache1/scui/data/object_detection
+      - ./sightline_object_detection/config.json:/app/config.json
+      - ./sightline_object_detection/yolo11x.pt:/app/yolo11x.pt:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - API_ENDPOINT=http://scui-go:8080/ingest_detection
+      - TELEGRAM_ENDPOINT=http://scui-go:8080/telegram/send_detection
+    restart: unless-stopped
+    networks:
+      - scui-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import torch; exit(0)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  scui-go:
+    build:
+      context: .
+      dockerfile: ./api/Dockerfile
+    container_name: scui-api
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./api/config.json:/app/config.json:ro
+      - ./data:/app/data
+      - ./data:/media/nas/cache1/scui/data
+      - ./data/object_detection:/media/nas/cache1/scui/data/object_detection
+      - ./data/object_detection:/mnt/nas/pool/Cameras/GPU_Processing
+      - /mnt/nas/pool/Cameras/House:/mnt/nas/pool/Cameras/House
+    environment:
+      - TZ=UTC
+    # Temporarily disabled to debug Python service
+    # depends_on:
+    #   python-detection:
+    #     condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - scui-network
+    command: ["./scui"]
+
+networks:
+  scui-network:
+    driver: bridge
+

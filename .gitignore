@@ -35,3 +35,5 @@ Security-Camera-UI/
 api/scui-api-fixed
 api/config.json
 *.json
+/sightline_object_detection/test/.venv
+/sightline_object_detection/.venv

@@ -1,0 +1,36 @@
+# Binaries (except scui-api which we need for the Docker image)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+scui
+# scui-api is needed for Docker build, so don't exclude it
+
+# Test files
+*_test.go
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Data directories (will be mounted as volumes)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Build artifacts
+*.a
+dist/
+
