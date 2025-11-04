@@ -1,11 +1,11 @@
-# Binaries
+# Binaries (except scui-api which we need for the Docker image)
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 scui
-scui-api
+# scui-api is needed for Docker build, so don't exclude it
 
 # Test files
 *_test.go

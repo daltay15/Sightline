@@ -4,10 +4,10 @@ package config
 const (
 	// Directory paths
 	RootDir       = "/mnt/nas/pool/Cameras/House"
-	PendingDir    = "/mnt/nas/pool/Cameras/GPU_Processing/pending"
-	ProcessingDir = "/mnt/nas/pool/Cameras/GPU_Processing/processing"
-	CompletedDir  = "/mnt/nas/pool/Cameras/GPU_Processing/completed"
-	FailedDir     = "/mnt/nas/pool/Cameras/GPU_Processing/failed"
+	PendingDir    = "/media/nas/cache1/scui/data/object_detection/pending"
+	ProcessingDir = "/media/nas/cache1/scui/data/object_detection/processing"
+	CompletedDir  = "/media/nas/cache1/scui/data/object_detection/completed"
+	FailedDir     = "/media/nas/cache1/scui/data/object_detection/failed"
 	DbPath        = "/media/nas/cache1/scui/data/events.db"
 	ThumbsDir     = "/media/nas/cache1/scui/data/thumbs"
 

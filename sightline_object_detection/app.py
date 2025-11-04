@@ -100,7 +100,7 @@ def get_default_config() -> dict:
             "yield_ms": 0,
             "vram_fraction": None,
             "device": "cpu",
-            "base": "/mnt/nas/pool/Cameras/GPU_Processing",
+            "base": "/media/nas/cache1/scui/data/object_detection",
             "model": "yolo11x.pt",
             "imgsz": 1280,
             "task": "detect",
@@ -126,7 +126,7 @@ def get_default_config() -> dict:
             "yield_ms": 20,
             "vram_fraction": 0.75,
             "device": "auto",
-            "base": "/mnt/nas/pool/Cameras/GPU_Processing",
+            "base": "/media/nas/cache1/scui/data/object_detection",
             "model": "yolo11x.pt",
             "imgsz": 1280,
             "task": "detect",
@@ -475,7 +475,7 @@ class YOLODetector:
 # --------- API Integration ---------
 
 def send_detection_to_telegram(detection_result: DetectionResult, original_path: str, 
-                              telegram_endpoint: str, camera_name: str = None) -> bool:
+                              telegram_endpoint: str, camera_name: str = None) -> Optional[bool]:
     """
     Send detection data directly to Telegram endpoint for immediate alerting.
     
@@ -486,7 +486,7 @@ def send_detection_to_telegram(detection_result: DetectionResult, original_path:
         camera_name: Optional camera name for the alert
         
     Returns:
-        True if successful, False otherwise
+        True if successful, False if failed, None if no person detected (no telegram sent)
     """
     try:
         # Extract camera name from path if not provided
@@ -521,7 +521,7 @@ def send_detection_to_telegram(detection_result: DetectionResult, original_path:
                 person_detections.append(detection)
         
         if not has_person:
-            return True 
+            return None  # Return None to indicate no telegram was sent (no person detected) 
         
         # Read and encode the annotated image (same logic as Go code)
         image_b64 = ""
@@ -666,17 +666,16 @@ def process_one(img_in_pending: Path, base: Path, runner, topk: int, api_endpoin
         if isinstance(runner, YOLODetector):
             det = runner.detect(processing_path)
             if not disable_telegram and telegram_endpoint:
-                telegram_success = send_detection_to_telegram(
+                telegram_result = send_detection_to_telegram(
                     detection_result=det,
                     original_path=str(processing_path),
                     telegram_endpoint=telegram_endpoint
                 )
-                if telegram_success:
+                if telegram_result is True:
                     logging.info("🚨 Telegram alert sent")
-                else:
+                elif telegram_result is False:
                     logging.error("❌ Telegram alert failed")
-            else:
-                logging.warning(f"Telegram alert skipped - disable_telegram: {disable_telegram}, telegram_endpoint: {telegram_endpoint}")
+                # Don't log anything if telegram_result is None (no person detected)
 
             stem = processing_path.stem
             json_path = processing_path.with_suffix("").parent / f"{stem}.json"
@@ -808,17 +807,16 @@ def process_batch(batch_imgs: List[Path], base: Path, runner, topk: int, skip_de
                 
                 # Send Telegram alert immediately after detection (ASAP alerting)
                 if not disable_telegram and telegram_endpoint:
-                    telegram_success = send_detection_to_telegram(
+                    telegram_result = send_detection_to_telegram(
                         detection_result=det,
                         original_path=str(processing_path),
                         telegram_endpoint=telegram_endpoint
                     )
-                    if telegram_success:
-                        logging.info("🚨 Telegram alert sent immediately for detection")
-                    else:
+                    if telegram_result is True:
+                        logging.info("🚨 Telegram alert sent for detection")
+                    elif telegram_result is False:
                         logging.error("❌ Telegram alert failed")
-                else:
-                    logging.warning(f"Telegram alert skipped - disable_telegram: {disable_telegram}, telegram_endpoint: {telegram_endpoint}")
+                    # Don't log anything if telegram_result is None (no person detected)
                 
                 stem = processing_path.stem
                 json_path = processing_path.with_suffix("").parent / f"{stem}.json"

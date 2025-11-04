@@ -1,15 +1,13 @@
-version: '3.8'
-
 services:
   python-detection:
     build:
-      context: ./gpu-detection-python/test
+      context: ./sightline_object_detection
       dockerfile: Dockerfile
     container_name: scui-python-detection
     volumes:
-      - ./data/gpu_processing:/mnt/nas/pool/Cameras/GPU_Processing
-      - ./gpu-detection-python/test/config.json:/app/config.json
-      - ./gpu-detection-python/test/yolo11x.pt:/app/yolo11x.pt:ro
+      - ./data/object_detection:/media/nas/cache1/scui/data/object_detection
+      - ./sightline_object_detection/config.json:/app/config.json
+      - ./sightline_object_detection/yolo11x.pt:/app/yolo11x.pt:ro
     environment:
       - PYTHONUNBUFFERED=1
       - API_ENDPOINT=http://scui-go:8080/ingest_detection
@@ -17,42 +15,39 @@ services:
     restart: unless-stopped
     networks:
       - scui-network
-    # Start first and give it a few seconds to initialize
     healthcheck:
-      test: ["CMD", "python", "-c", "import torch; exit(0 if torch.cuda.is_available() or True else 1)"]
-      interval: 10s
-      timeout: 5s
-      start_period: 30s
+      test: ["CMD", "python", "-c", "import torch; exit(0)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
       retries: 3
 
   scui-go:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./api/Dockerfile
     container_name: scui-api
     ports:
       - "8080:8080"
     volumes:
       - ./api/config.json:/app/config.json:ro
       - ./data:/app/data
-      - ./data/gpu_processing:/mnt/nas/pool/Cameras/GPU_Processing
-      - ./data/cameras:/mnt/nas/pool/Cameras/House
+      - ./data:/media/nas/cache1/scui/data
+      - ./data/object_detection:/media/nas/cache1/scui/data/object_detection
+      - ./data/object_detection:/mnt/nas/pool/Cameras/GPU_Processing
+      - /mnt/nas/pool/Cameras/House:/mnt/nas/pool/Cameras/House
     environment:
       - TZ=UTC
-    depends_on:
-      python-detection:
-        condition: service_healthy
+    # Temporarily disabled to debug Python service
+    # depends_on:
+    #   python-detection:
+    #     condition: service_healthy
     restart: unless-stopped
     networks:
       - scui-network
-    # Wait a few seconds after Python is healthy before starting
-    command: sh -c "sleep 5 && ./scui"
+    command: ["./scui"]
 
 networks:
   scui-network:
     driver: bridge
-
-volumes:
-  scui-data:
-    driver: local
 
