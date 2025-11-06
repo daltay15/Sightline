@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -50,7 +49,7 @@ func ScanAll(db *sql.DB, cfg Config) error {
 
 // ScanAllParallel processes files in parallel using worker pools
 func ScanAllParallel(db *sql.DB, cfg Config) error {
-	log.Printf("ScanAllParallel: Starting scan of %s", cfg.Root)
+	internal.LogInfo("ScanAllParallel: Starting scan of %s", cfg.Root)
 
 	// Set defaults if not provided
 	if cfg.MaxWorkers <= 0 {
@@ -76,15 +75,15 @@ func ScanAllParallel(db *sql.DB, cfg Config) error {
 		return nil
 	})
 	if err != nil {
-		log.Printf("ScanAllParallel: Error walking directory: %v", err)
+		internal.LogError("ScanAllParallel: Error walking directory: %v", err)
 		return err
 	}
 
 	// Filter out files that are already in the database and check file stability
 	var newFiles []string
-	log.Printf("ScanAllParallel: Found %d files to process", len(files))
+	internal.LogInfo("ScanAllParallel: Found %d files to process", len(files))
 	if len(files) == 0 {
-		log.Printf("ScanAllParallel: No files to process")
+		internal.LogInfo("ScanAllParallel: No files to process")
 		return nil
 	}
 
@@ -93,7 +92,7 @@ func ScanAllParallel(db *sql.DB, cfg Config) error {
 		var count int
 		err := db.QueryRow("SELECT COUNT(*) FROM events WHERE path = ?", file).Scan(&count)
 		if err != nil {
-			log.Printf("Error checking if file exists in database: %v", err)
+			internal.LogError("Error checking if file exists in database: %v", err)
 			continue
 		}
 
@@ -110,10 +109,10 @@ func ScanAllParallel(db *sql.DB, cfg Config) error {
 		// Only check stability for files modified very recently (within last 2 minutes)
 		if isFileVeryRecent(file) {
 			if isFileStable(file) {
-				log.Printf("ScanAllParallel: Adding stable file to process: %s", file)
+				internal.LogDebug("ScanAllParallel: Adding stable file to process: %s", file)
 				stableFiles = append(stableFiles, file)
 			} else {
-				log.Printf("ScanAllParallel: Skipping unstable file (still being written): %s", file)
+				internal.LogDebug("ScanAllParallel: Skipping unstable file (still being written): %s", file)
 			}
 		} else {
 			// File is not recent, add directly without delay
@@ -124,7 +123,7 @@ func ScanAllParallel(db *sql.DB, cfg Config) error {
 	// Update newFiles to only include stable files
 	newFiles = stableFiles
 
-	log.Printf("ScanAllParallel: Found %d new files to process (skipping %d existing files)", len(newFiles), len(files)-len(newFiles))
+	internal.LogInfo("ScanAllParallel: Found %d new files to process (skipping %d existing files)", len(newFiles), len(files)-len(newFiles))
 
 	// Process only new files in parallel
 	return processFilesParallel(db, cfg, newFiles)
@@ -183,7 +182,7 @@ func processFilesParallel(db *sql.DB, cfg Config, files []string) error {
 	case err := <-errorChan:
 		// Log the error but don't fail the entire scan
 		// Individual file errors should not stop the scanning process
-		log.Printf("Error processing file: %v", err)
+		internal.LogError("Error processing file: %v", err)
 	default:
 		return nil
 	}
@@ -214,7 +213,7 @@ func ScanDetectionImages(db *sql.DB, cfg Config) error {
 		return nil
 	})
 	if err != nil {
-		log.Printf("Error walking detection directory: %v", err)
+		internal.LogError("Error walking detection directory: %v", err)
 		return err
 	}
 
@@ -225,7 +224,7 @@ func ScanDetectionImages(db *sql.DB, cfg Config) error {
 	// Process detection images
 	for _, file := range detectionFiles {
 		if err := indexDetectionFile(db, cfg, file); err != nil {
-			log.Printf("Error indexing detection file %s: %v", file, err)
+			internal.LogError("Error indexing detection file %s: %v", file, err)
 			// Continue processing other files
 		}
 	}
@@ -235,7 +234,7 @@ func ScanDetectionImages(db *sql.DB, cfg Config) error {
 
 // ProcessSingleFile processes a single file immediately (for file watcher)
 func ProcessSingleFile(db *sql.DB, cfg Config, filePath string) error {
-	log.Printf("ProcessSingleFile: Processing %s", filePath)
+	internal.LogDebug("ProcessSingleFile: Processing %s", filePath)
 
 	// Check if file already exists in database
 	var count int
@@ -245,7 +244,7 @@ func ProcessSingleFile(db *sql.DB, cfg Config, filePath string) error {
 	}
 
 	if count > 0 {
-		log.Printf("ProcessSingleFile: File already in database, skipping: %s", filePath)
+		internal.LogDebug("ProcessSingleFile: File already in database, skipping: %s", filePath)
 		return nil
 	}
 
@@ -306,7 +305,7 @@ func indexDetectionFile(db *sql.DB, cfg Config, p string) error {
 	var originalEventID int64
 	err = db.QueryRow("SELECT id FROM events WHERE id = ?", eventID).Scan(&originalEventID)
 	if err != nil {
-		log.Printf("Error indexing detection file %s: original event %d not found, cleaning up orphan file", p, eventID)
+		internal.LogWarn("Error indexing detection file %s: original event %d not found, cleaning up orphan file", p, eventID)
 		// Best-effort removal of orphan detection image and its JSON (if present)
 		_ = os.Remove(p)
 		// Try to remove paired JSON next to this detection image
@@ -575,24 +574,24 @@ func upsertEventsBatch(db *sql.DB, events []*internal.Event, pendingDir string) 
 
 	commitStart := time.Now()
 	// Commit the transaction first to get the event IDs
-	log.Printf("Committing transaction")
+	internal.LogDebug("Committing transaction")
 	if err := tx.Commit(); err != nil {
-		log.Printf("Warning: Failed to commit transaction: %v", err)
+		internal.LogWarn("Failed to commit transaction: %v", err)
 		return err
 	}
 	commitEnd := time.Now()
-	log.Printf("Committed transaction in %v", commitEnd.Sub(commitStart))
+	internal.LogDebug("Committed transaction in %v", commitEnd.Sub(commitStart))
 
 	// After successful database insertion, copy JPG files to processing directory
 	// with event_id prepended to filename for easier processing
 	copyStart := time.Now()
-	log.Printf("Copying JPG files to processing directory")
+	internal.LogDebug("Copying JPG files to processing directory")
 	if err := copyJpgFilesToProcessing(db, events, pendingDir); err != nil {
-		log.Printf("Warning: Failed to copy JPG files to processing directory: %v", err)
+		internal.LogWarn("Failed to copy JPG files to processing directory: %v", err)
 		// Don't return error here as the main indexing was successful
 	}
 	copyEnd := time.Now()
-	log.Printf("Copied JPG files to processing directory in %v", copyEnd.Sub(copyStart))
+	internal.LogDebug("Copied JPG files to processing directory in %v", copyEnd.Sub(copyStart))
 
 	return nil
 }
@@ -696,7 +695,7 @@ func copyJpgFilesToProcessing(db *sql.DB, events []*internal.Event, pendingDir s
 		if strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") {
 			// Check if camera is excluded from detection processing
 			if IsCameraExcludedFromDetection(event.Camera) {
-				log.Printf("Skipping detection processing for excluded camera: %s", event.Camera)
+				internal.LogDebug("Skipping detection processing for excluded camera: %s", event.Camera)
 				continue
 			}
 			jpgEvents = append(jpgEvents, event)
@@ -713,7 +712,7 @@ func copyJpgFilesToProcessing(db *sql.DB, events []*internal.Event, pendingDir s
 		var eventID int64
 		err := db.QueryRow("SELECT id FROM events WHERE path = ?", event.Path).Scan(&eventID)
 		if err != nil {
-			log.Printf("Warning: Failed to get event ID for path %s: %v", event.Path, err)
+			internal.LogWarn("Failed to get event ID for path %s: %v", event.Path, err)
 			continue
 		}
 		eventIDs[event.Path] = eventID
@@ -732,7 +731,7 @@ func copyJpgFilesToProcessing(db *sql.DB, events []*internal.Event, pendingDir s
 
 		// Ensure processing directory exists
 		if err := os.MkdirAll(pendingDir, 0755); err != nil {
-			log.Printf("Warning: Failed to create processing directory: %v, %s", err, pendingDir)
+			internal.LogWarn("Failed to create processing directory: %v, %s", err, pendingDir)
 			continue
 		}
 
@@ -740,13 +739,13 @@ func copyJpgFilesToProcessing(db *sql.DB, events []*internal.Event, pendingDir s
 
 		// Check if file already exists
 		if _, err := os.Stat(destPath); err == nil {
-			log.Printf("Processing file already exists, skipping: %s", destPath)
+			internal.LogDebug("Processing file already exists, skipping: %s", destPath)
 			continue
 		}
 
 		// Copy the file
 		if err := copyFileWithEventID(event.Path, destPath); err != nil {
-			log.Printf("Warning: Failed to copy file %s to processing directory: %v", event.Path, err)
+			internal.LogWarn("Failed to copy file %s to processing directory: %v", event.Path, err)
 			continue
 		}
 	}
@@ -816,7 +815,7 @@ func sendTelegramNotificationIfPersonDetected(db *sql.DB, cfg Config, jsonPath, 
 		configManager := internal.NewConfigManager("config.json")
 		if err := configManager.LoadConfig(); err == nil {
 			if telegramEnabled := configManager.GetBool("telegram_enabled", false); telegramEnabled {
-				log.Printf("Warning: Telegram is enabled in config but TelegramURL is not set in indexer config")
+				internal.LogWarn("Telegram is enabled in config but TelegramURL is not set in indexer config")
 			}
 		}
 		// Telegram not configured, skip notification
@@ -904,7 +903,7 @@ func sendTelegramNotificationIfPersonDetected(db *sql.DB, cfg Config, jsonPath, 
 	if imagePath != "" {
 		imageData, err := os.ReadFile(imagePath)
 		if err != nil {
-			log.Printf("Failed to read image file %s: %v", imagePath, err)
+			internal.LogError("Failed to read image file %s: %v", imagePath, err)
 		} else {
 			imageB64 = base64.StdEncoding.EncodeToString(imageData)
 			imageName = filepath.Base(imagePath)
@@ -947,24 +946,24 @@ func sendTelegramNotificationIfPersonDetected(db *sql.DB, cfg Config, jsonPath, 
 	// Send using direct Telegram client (same as test button)
 	configManager := internal.NewConfigManager("config.json")
 	if err := configManager.LoadConfig(); err != nil {
-		log.Printf("Failed to load config for Telegram: %v", err)
+		internal.LogError("Failed to load config for Telegram: %v", err)
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	telegramClient, err := telegram.NewTelegramClient(configManager.GetConfig())
 	if err != nil {
-		log.Printf("Failed to create Telegram client: %v", err)
+		internal.LogError("Failed to create Telegram client: %v", err)
 		return fmt.Errorf("failed to create Telegram client: %w", err)
 	}
 
-	log.Printf("Sending Telegram notification directly using Telegram client")
+	internal.LogDebug("Sending Telegram notification directly using Telegram client")
 
 	if err := telegramClient.SendDetection(payload, "security_group"); err != nil {
-		log.Printf("Failed to send Telegram notification: %v", err)
+		internal.LogError("Failed to send Telegram notification: %v", err)
 		return fmt.Errorf("failed to send Telegram notification: %w", err)
 	}
 
-	log.Printf("Successfully sent Telegram notification for event %d", eventID)
+	internal.LogInfo("Successfully sent Telegram notification for event %d", eventID)
 	return nil
 }
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,7 +21,7 @@ type DetectionProcessor struct {
 	failedDir     string
 	completedDir  string
 	lastDebugTime time.Time
-	logger        *log.Logger
+	logger        *Logger
 	telegramURL   string // URL for the Telegram bot API
 }
 
@@ -48,8 +47,8 @@ func NewDetectionProcessor(db *sql.DB, pendingDir, processingDir, completedDir, 
 	// Set up file logging for detection processor
 	logFile, err := os.OpenFile("detection_processor.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		log.Printf("Warning: Failed to open detection processor log file: %v", err)
-		// Fall back to standard logger if file logging fails
+		LogWarn("Failed to open detection processor log file: %v", err)
+		// Fall back to stdout logger if file logging fails
 		return &DetectionProcessor{
 			db:            db,
 			pendingDir:    pendingDir,
@@ -57,13 +56,13 @@ func NewDetectionProcessor(db *sql.DB, pendingDir, processingDir, completedDir, 
 			completedDir:  completedDir,
 			failedDir:     failedDir,
 			telegramURL:   telegramURL,
-			logger:        log.New(os.Stdout, "[DETECTION] ", log.LstdFlags),
+			logger:        NewLogger(INFO, "[DETECTION] ", os.Stdout),
 		}
 	}
 
 	// Create a multi-writer to log to both file and stdout
 	multiWriter := io.MultiWriter(logFile, os.Stdout)
-	detectionLogger := log.New(multiWriter, "[DETECTION] ", log.LstdFlags)
+	detectionLogger := NewLogger(INFO, "[DETECTION] ", multiWriter)
 
 	return &DetectionProcessor{
 		db:            db,
@@ -78,11 +77,11 @@ func NewDetectionProcessor(db *sql.DB, pendingDir, processingDir, completedDir, 
 
 // ProcessCompletedFiles scans the completed directory for new detection files
 func (dp *DetectionProcessor) ProcessCompletedFiles() error {
-	dp.logger.Printf("=== DetectionProcessor: Starting scan of completed directory: %s", dp.completedDir)
+	dp.logger.Info("=== DetectionProcessor: Starting scan of completed directory: %s", dp.completedDir)
 
 	// Check if completed directory exists
 	if _, err := os.Stat(dp.completedDir); os.IsNotExist(err) {
-		dp.logger.Printf("Completed directory does not exist: %s", dp.completedDir)
+		dp.logger.Warn("Completed directory does not exist: %s", dp.completedDir)
 		return nil
 	}
 
@@ -99,7 +98,7 @@ func (dp *DetectionProcessor) ProcessCompletedFiles() error {
 	// Walk through the completed directory looking for JSON files
 	err := filepath.WalkDir(dp.completedDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			dp.logger.Printf("Error walking directory %s: %v", path, err)
+			dp.logger.Error("Error walking directory %s: %v", path, err)
 			NotifyError("error", "detection_processor", "Failed to walk directory", map[string]interface{}{
 				"path":  path,
 				"error": err.Error(),
@@ -121,7 +120,7 @@ func (dp *DetectionProcessor) ProcessCompletedFiles() error {
 
 		// Process the detection file
 		if err := dp.processDetectionFile(path); err != nil {
-			dp.logger.Printf("Error processing detection file %s: %v", path, err)
+			dp.logger.Error("Error processing detection file %s: %v", path, err)
 			errorCount++
 			return nil // Continue processing other files
 		}
@@ -134,13 +133,13 @@ func (dp *DetectionProcessor) ProcessCompletedFiles() error {
 		return nil
 	})
 
-	dp.logger.Printf("=== DetectionProcessor: Scan complete - Found %d JSON files, processed %d, errors %d", jsonFileCount, processedCount, errorCount)
+	dp.logger.Info("=== DetectionProcessor: Scan complete - Found %d JSON files, processed %d, errors %d", jsonFileCount, processedCount, errorCount)
 
 	// Log recent detection updates for debugging
 	if processedCount > 0 {
 		var recentUpdates int64
 		_ = dp.db.QueryRow("SELECT COUNT(*) FROM events WHERE detection_updated > ?", time.Now().Unix()-60).Scan(&recentUpdates)
-		dp.logger.Printf("=== DetectionProcessor: Recent detection updates in last minute: %d", recentUpdates)
+		dp.logger.Debug("=== DetectionProcessor: Recent detection updates in last minute: %d", recentUpdates)
 	}
 	return err
 }
@@ -152,17 +151,17 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 	if err != nil {
 		// If file doesn't exist, it was likely deleted - log as info and skip
 		if os.IsNotExist(err) {
-			dp.logger.Printf("Detection file deleted, skipping: %s", jsonPath)
+			dp.logger.Debug("Detection file deleted, skipping: %s", jsonPath)
 			return nil // Not an error - file was intentionally deleted
 		}
-		dp.logger.Printf("Failed to read JSON file %s: %v", jsonPath, err)
+		dp.logger.Error("Failed to read JSON file %s: %v", jsonPath, err)
 		return fmt.Errorf("failed to read JSON file: %w", err)
 	}
 
 	// Parse the detection data
 	var detectionFile DetectionFile
 	if err := json.Unmarshal(data, &detectionFile); err != nil {
-		dp.logger.Printf("Failed to parse JSON from %s: %v", jsonPath, err)
+		dp.logger.Error("Failed to parse JSON from %s: %v", jsonPath, err)
 		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
@@ -170,13 +169,13 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 	// Expected format: {event_id}__{original_filename}.json
 	eventID, err := dp.extractEventIDFromFilename(jsonPath)
 	if err != nil {
-		dp.logger.Printf("Failed to extract event ID from filename %s: %v", jsonPath, err)
+		dp.logger.Error("Failed to extract event ID from filename %s: %v", jsonPath, err)
 		return fmt.Errorf("failed to extract event ID from filename: %w", err)
 	}
 
 	// Verify the event exists in the database. If missing, clean up orphan JSON and skip.
 	if err := dp.verifyEventExists(eventID); err != nil {
-		dp.logger.Printf("Event ID %d does not exist in database, cleaning up orphan detection JSON: %v", eventID, err)
+		dp.logger.Warn("Event ID %d does not exist in database, cleaning up orphan detection JSON: %v", eventID, err)
 		// Remove the JSON file and best-effort remove its sibling annotated image
 		_ = os.Remove(jsonPath)
 		// If an annotated image exists with same stem, remove it
@@ -193,7 +192,7 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 	// Update the event with detection data
 	detectionJSON, err := json.Marshal(detectionFile)
 	if err != nil {
-		dp.logger.Printf("Failed to marshal detection data for event %d: %v", eventID, err)
+		dp.logger.Error("Failed to marshal detection data for event %d: %v", eventID, err)
 		return fmt.Errorf("failed to marshal detection data: %w", err)
 	}
 
@@ -222,13 +221,13 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 		// Check if it's a database lock error
 		if strings.Contains(err.Error(), "database is locked") || strings.Contains(err.Error(), "SQLITE_BUSY") {
 			if attempt < maxRetries-1 {
-				dp.logger.Printf("Database locked, retrying in 100ms (attempt %d/%d): %v", attempt+1, maxRetries, err)
+				dp.logger.Warn("Database locked, retrying in 100ms (attempt %d/%d): %v", attempt+1, maxRetries, err)
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
 		}
 
-		dp.logger.Printf("Failed to update event %d with detection data: %v", eventID, err)
+		dp.logger.Error("Failed to update event %d with detection data: %v", eventID, err)
 		return fmt.Errorf("failed to update event with detection data: %w", err)
 	}
 
@@ -248,7 +247,7 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 			`
 			_, err = dp.db.Exec(insertQuery, eventID, det.Label, det.Score, bboxX, bboxY, bboxWidth, bboxHeight, time.Now().Unix())
 			if err != nil {
-				dp.logger.Printf("Failed to insert detection for event %d: %v", eventID, err)
+				dp.logger.Error("Failed to insert detection for event %d: %v", eventID, err)
 			}
 		}
 	}
@@ -269,7 +268,7 @@ func (dp *DetectionProcessor) extractEventIDFromFilename(jsonPath string) (int64
 	// Split by double underscore to get event_id and original filename
 	parts := strings.SplitN(baseName, "__", 2)
 	if len(parts) < 2 {
-		dp.logger.Printf("Filename does not contain double underscore separator: %s", baseName)
+		dp.logger.Error("Filename does not contain double underscore separator: %s", baseName)
 		return 0, fmt.Errorf("filename does not contain double underscore separator: %s", baseName)
 	}
 
@@ -278,7 +277,7 @@ func (dp *DetectionProcessor) extractEventIDFromFilename(jsonPath string) (int64
 	// Parse event ID as integer
 	eventID, err := strconv.ParseInt(eventIDStr, 10, 64)
 	if err != nil {
-		dp.logger.Printf("Failed to parse event ID '%s' as integer: %v", eventIDStr, err)
+		dp.logger.Error("Failed to parse event ID '%s' as integer: %v", eventIDStr, err)
 		return 0, fmt.Errorf("failed to parse event ID '%s' as integer: %w", eventIDStr, err)
 	}
 
@@ -291,12 +290,12 @@ func (dp *DetectionProcessor) verifyEventExists(eventID int64) error {
 	query := "SELECT COUNT(*) FROM events WHERE id = ?"
 	err := dp.db.QueryRow(query, eventID).Scan(&count)
 	if err != nil {
-		dp.logger.Printf("Database error checking event ID %d: %v", eventID, err)
+		dp.logger.Error("Database error checking event ID %d: %v", eventID, err)
 		return fmt.Errorf("database error checking event ID %d: %w", eventID, err)
 	}
 
 	if count == 0 {
-		dp.logger.Printf("Event ID %d not found in database", eventID)
+		dp.logger.Warn("Event ID %d not found in database", eventID)
 		return fmt.Errorf("event ID %d not found in database", eventID)
 	}
 
@@ -310,7 +309,7 @@ func (dp *DetectionProcessor) eventAlreadyHasDetections(eventID int64) bool {
 	query := "SELECT detection_data IS NOT NULL FROM events WHERE id = ?"
 	err := dp.db.QueryRow(query, eventID).Scan(&detectionDataExists)
 	if err != nil {
-		dp.logger.Printf("Error checking detection data for event ID %d: %v", eventID, err)
+		dp.logger.Error("Error checking detection data for event ID %d: %v", eventID, err)
 		return false // If we can't check, assume it doesn't have detections
 	}
 
@@ -323,7 +322,7 @@ func (dp *DetectionProcessor) eventAlreadyHasDetections(eventID int64) bool {
 	query = "SELECT COUNT(*) FROM detections WHERE event_id = ?"
 	err = dp.db.QueryRow(query, eventID).Scan(&detectionCount)
 	if err != nil {
-		dp.logger.Printf("Error checking detections count for event ID %d: %v", eventID, err)
+		dp.logger.Error("Error checking detections count for event ID %d: %v", eventID, err)
 		return false // If we can't check, assume it doesn't have detections
 	}
 
@@ -340,18 +339,18 @@ func (dp *DetectionProcessor) DebugDatabaseContents() {
 	var totalEvents int
 	err := dp.db.QueryRow("SELECT COUNT(*) FROM events").Scan(&totalEvents)
 	if err != nil {
-		dp.logger.Printf("Error getting total events count: %v", err)
+		dp.logger.Error("Error getting total events count: %v", err)
 		return
 	}
 
 	if totalEvents == 0 {
-		dp.logger.Printf("No events found in database - this is likely the issue!")
+		dp.logger.Warn("No events found in database - this is likely the issue!")
 		return
 	}
 
 	// Only log if there are issues or for critical debugging
 	if totalEvents < 10 {
-		dp.logger.Printf("Low event count in database: %d events", totalEvents)
+		dp.logger.Warn("Low event count in database: %d events", totalEvents)
 	}
 }
 

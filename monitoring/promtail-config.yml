@@ -1,0 +1,75 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Scrape logs from Docker containers using Docker service discovery
+  # This approach uses Docker socket to discover containers and read logs
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        # Filters to only discover scui containers
+        filters:
+          - name: name
+            values: ["scui-.*"]
+    relabel_configs:
+      # Exclude Loki and Promtail logs first (they're mostly internal operational query logs)
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/scui-(loki|promtail)'
+        action: drop
+      # Only keep containers that match our naming pattern (after dropping monitoring containers)
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/scui-.*'
+        action: keep
+      # CRITICAL: Set job label (required by Loki - must have at least one label)
+      - target_label: 'job'
+        replacement: 'docker'
+      # Extract container name (remove leading slash)
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container_name'
+        replacement: '${1}'
+      # Set container label (fallback to container_name if needed)
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+        replacement: '${1}'
+      # Extract service name from container name (e.g., scui-api -> api, scui-python-detection -> python-detection)
+      - source_labels: ['container_name']
+        regex: 'scui-(.*)'
+        target_label: 'service'
+        replacement: '${1}'
+      # Add labels for better filtering in Grafana
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'compose_service'
+        replacement: '${1}'
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'log_stream'
+        replacement: '${1}'
+    pipeline_stages:
+      # Parse log timestamps
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[\.\d]*[Z]?[\+\-]\d{2}:\d{2}?)'
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      # Extract log level if present
+      - regex:
+          expression: '\[(?P<level>DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\]'
+      # Add labels based on log content
+      - regex:
+          expression: '.*(error|Error|ERROR|failed|Failed|FAILED).*'
+          source: 'level'
+          target_label: 'has_error'
+      - regex:
+          expression: '.*(warning|Warning|WARNING).*'
+          source: 'level'
+          target_label: 'has_warning'
+

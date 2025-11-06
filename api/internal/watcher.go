@@ -2,7 +2,6 @@ package internal
 
 import (
 	"database/sql"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +19,7 @@ type FileWatcher struct {
 	pendingDir     string
 	telegramURL    string
 	processedFiles map[string]time.Time
-	logger         *log.Logger
+	logger         *Logger
 	// Health monitoring
 	lastCleanup time.Time
 	eventCount  int64
@@ -34,7 +33,7 @@ func NewFileWatcher(db *sql.DB, rootDir, thumbsDir, pendingDir, telegramURL stri
 		NotifyCriticalError("file_watcher", "Failed to create file watcher", map[string]interface{}{
 			"error": err.Error(),
 		})
-		log.Fatalf("Failed to create file watcher: %v", err)
+		LogFatal("Failed to create file watcher: %v", err)
 	}
 
 	return &FileWatcher{
@@ -45,7 +44,7 @@ func NewFileWatcher(db *sql.DB, rootDir, thumbsDir, pendingDir, telegramURL stri
 		pendingDir:     pendingDir,
 		telegramURL:    telegramURL,
 		processedFiles: make(map[string]time.Time),
-		logger:         log.New(os.Stdout, "[WATCHER] ", log.LstdFlags),
+		logger:         NewLogger(INFO, "[WATCHER] ", os.Stdout),
 		lastCleanup:    time.Now(),
 		eventCount:     0,
 		errorCount:     0,
@@ -54,7 +53,7 @@ func NewFileWatcher(db *sql.DB, rootDir, thumbsDir, pendingDir, telegramURL stri
 
 // Start begins monitoring the file system for changes
 func (fw *FileWatcher) Start() error {
-	fw.logger.Printf("Starting file watcher for directory: %s", fw.rootDir)
+	fw.logger.Info("Starting file watcher for directory: %s", fw.rootDir)
 
 	// Add the root directory to watch
 	if err := fw.watcher.Add(fw.rootDir); err != nil {
@@ -63,7 +62,7 @@ func (fw *FileWatcher) Start() error {
 
 	// Recursively add all subdirectories
 	if err := fw.addSubdirectories(fw.rootDir); err != nil {
-		fw.logger.Printf("Warning: Failed to add some subdirectories: %v", err)
+		fw.logger.Warn("Failed to add some subdirectories: %v", err)
 	}
 
 	// Start the event processing goroutine
@@ -80,7 +79,7 @@ func (fw *FileWatcher) addSubdirectories(dir string) error {
 		}
 		if d.IsDir() {
 			if err := fw.watcher.Add(path); err != nil {
-				fw.logger.Printf("Warning: Could not watch directory %s: %v", path, err)
+				fw.logger.Warn("Could not watch directory %s: %v", path, err)
 			}
 		}
 		return nil
@@ -93,17 +92,17 @@ func (fw *FileWatcher) processEvents() {
 		select {
 		case event, ok := <-fw.watcher.Events:
 			if !ok {
-				fw.logger.Printf("File watcher events channel closed")
+				fw.logger.Warn("File watcher events channel closed")
 				return
 			}
 			fw.handleEvent(event)
 
 		case err, ok := <-fw.watcher.Errors:
 			if !ok {
-				fw.logger.Printf("File watcher errors channel closed")
+				fw.logger.Warn("File watcher errors channel closed")
 				return
 			}
-			fw.logger.Printf("File watcher error: %v", err)
+			fw.logger.Error("File watcher error: %v", err)
 		}
 	}
 }
@@ -132,7 +131,7 @@ func (fw *FileWatcher) handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	fw.logger.Printf("New file detected: %s", filePath)
+	fw.logger.Info("New file detected: %s", filePath)
 
 	// Process the file immediately
 	go fw.processFile(filePath)
@@ -172,7 +171,7 @@ func (fw *FileWatcher) cleanupOldProcessedFiles(now time.Time) {
 	}
 
 	if cleanedCount > 0 {
-		fw.logger.Printf("Cleaned up %d old processed file entries, %d remaining", cleanedCount, len(fw.processedFiles))
+		fw.logger.Debug("Cleaned up %d old processed file entries, %d remaining", cleanedCount, len(fw.processedFiles))
 	}
 	fw.lastCleanup = now
 }
@@ -193,7 +192,7 @@ func (fw *FileWatcher) processFile(filePath string) {
 	defer func() {
 		if r := recover(); r != nil {
 			fw.errorCount++
-			fw.logger.Printf("Panic in processFile for %s: %v", filePath, r)
+			fw.logger.Error("Panic in processFile for %s: %v", filePath, r)
 		}
 	}()
 
@@ -202,7 +201,7 @@ func (fw *FileWatcher) processFile(filePath string) {
 
 	// Check if file is stable
 	if !fw.isFileStable(filePath) {
-		fw.logger.Printf("File not stable yet, skipping: %s", filePath)
+		fw.logger.Debug("File not stable yet, skipping: %s", filePath)
 		return
 	}
 
@@ -211,16 +210,16 @@ func (fw *FileWatcher) processFile(filePath string) {
 	err := fw.db.QueryRow("SELECT COUNT(*) FROM events WHERE path = ?", filePath).Scan(&count)
 	if err != nil {
 		fw.errorCount++
-		fw.logger.Printf("Error checking file in database: %v", err)
+		fw.logger.Error("Error checking file in database: %v", err)
 		return
 	}
 
 	if count > 0 {
-		fw.logger.Printf("File already in database, skipping: %s", filePath)
+		fw.logger.Debug("File already in database, skipping: %s", filePath)
 		return
 	}
 
-	fw.logger.Printf("Processing new file: %s", filePath)
+	fw.logger.Info("Processing new file: %s", filePath)
 
 	// Trigger immediate processing by creating a signal file
 	// This will cause the background scanner to process this file immediately
@@ -234,11 +233,11 @@ func (fw *FileWatcher) triggerImmediateProcessing(filePath string) {
 
 	// Write the file path to the signal file
 	if err := os.WriteFile(signalFile, []byte(filePath), 0644); err != nil {
-		fw.logger.Printf("Failed to create signal file: %v", err)
+		fw.logger.Error("Failed to create signal file: %v", err)
 		return
 	}
 
-	fw.logger.Printf("Triggered immediate processing for: %s", filePath)
+	fw.logger.Debug("Triggered immediate processing for: %s", filePath)
 }
 
 // isFileStable checks if a file is stable (not being written to)
