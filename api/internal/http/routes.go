@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -628,12 +627,12 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 			attemptedFolders++
 			if err := os.RemoveAll(dayFolder); err == nil || os.IsNotExist(err) {
 				deletedFolders++
-				log.Printf("Deleted day folder: %s", dayFolder)
+				internal.LogDebug("Deleted day folder: %s", dayFolder)
 			} else {
 				if len(failedSamples) < 10 {
 					failedSamples = append(failedSamples, map[string]string{"path": dayFolder, "error": err.Error()})
 				}
-				log.Printf("Delete failed: %s (%v)", dayFolder, err)
+				internal.LogError("Delete failed: %s (%v)", dayFolder, err)
 			}
 		}
 
@@ -650,9 +649,9 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 			if len(entries) == 0 {
 				if err := os.Remove(monthFolder); err == nil || os.IsNotExist(err) {
 					deletedMonthFolders++
-					log.Printf("Deleted empty month folder: %s", monthFolder)
+					internal.LogDebug("Deleted empty month folder: %s", monthFolder)
 				} else {
-					log.Printf("Failed to delete empty month folder %s: %v", monthFolder, err)
+					internal.LogError("Failed to delete empty month folder %s: %v", monthFolder, err)
 				}
 			}
 		}
@@ -2249,7 +2248,7 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 
 	// Send telegram detection endpoint
 	r.POST("/telegram/send_detection", func(c *gin.Context) {
-		log.Printf("Received Telegram detection request: %v", c.Request.Body)
+		internal.LogDebug("Received Telegram detection request: %v", c.Request.Body)
 		if telegramClient == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Telegram not configured"})
 			return
@@ -2262,7 +2261,7 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 		}
 
 		if err := telegramClient.SendDetection(payload, "security_group"); err != nil {
-			log.Printf("Failed to send Telegram notification: %v", err)
+			internal.LogError("Failed to send Telegram notification: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

@@ -3,7 +3,6 @@ package internal
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -65,7 +64,7 @@ func (c *FileBasedGPUClient) SubmitProcessingRequest(request GPUProcessingReques
 		return fmt.Errorf("failed to write request file: %w", err)
 	}
 
-	log.Printf("GPU File Client: Submitted processing request %s for file %s", request.ID, request.FilePath)
+	LogDebug("GPU File Client: Submitted processing request %s for file %s", request.ID, request.FilePath)
 	return nil
 }
 

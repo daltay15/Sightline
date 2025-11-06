@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +29,7 @@ func NewFileCopier(db *sql.DB, cameraRoot, pendingDir, processingDir, completedD
 	// Ensure all directories exist
 	for _, dir := range []string{pendingDir, processingDir, completedDir, failedDir} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			log.Fatalf("Failed to create directory %s: %v", dir, err)
+			LogFatal("Failed to create directory %s: %v", dir, err)
 		}
 	}
 
@@ -91,7 +90,7 @@ func (fc *FileCopier) CopyNewFilesToPending() error {
 		return nil // No new files to copy
 	}
 
-	log.Printf("FileCopier: Found %d new JPG files to copy to pending directory (lastCopiedTs: %d)", len(filesToCopy), fc.lastCopiedTs)
+	LogDebug("FileCopier: Found %d new JPG files to copy to pending directory (lastCopiedTs: %d)", len(filesToCopy), fc.lastCopiedTs)
 
 	// Ensure pending directory exists
 	if err := os.MkdirAll(fc.pendingDir, 0755); err != nil {
@@ -102,7 +101,7 @@ func (fc *FileCopier) CopyNewFilesToPending() error {
 	copiedCount := 0
 	for _, sourcePath := range filesToCopy {
 		if err := fc.copyFileToPending(sourcePath); err != nil {
-			log.Printf("FileCopier: Failed to copy %s: %v", sourcePath, err)
+			LogError("FileCopier: Failed to copy %s: %v", sourcePath, err)
 			continue
 		}
 		copiedCount++
@@ -114,10 +113,10 @@ func (fc *FileCopier) CopyNewFilesToPending() error {
 
 	// Save the timestamp for persistence across restarts
 	if err := fc.saveLastCopiedTimestamp(); err != nil {
-		log.Printf("FileCopier: Warning - failed to save timestamp: %v", err)
+		LogWarn("FileCopier: Failed to save timestamp: %v", err)
 	}
 
-	log.Printf("FileCopier: Successfully copied %d/%d files to pending directory (up to timestamp %d)", copiedCount, len(filesToCopy), maxTs)
+	LogInfo("FileCopier: Successfully copied %d/%d files to pending directory (up to timestamp %d)", copiedCount, len(filesToCopy), maxTs)
 	return nil
 }
 
@@ -135,7 +134,7 @@ func (fc *FileCopier) copyFileToPending(sourcePath string) error {
 
 	// Check if file already exists in pending (avoid duplicates)
 	if _, err := os.Stat(destPath); err == nil {
-		log.Printf("FileCopier: File already exists in pending: %s", fileName)
+		LogDebug("FileCopier: File already exists in pending: %s", fileName)
 		return nil
 	}
 
@@ -226,7 +225,7 @@ func (fc *FileCopier) CleanupOldFiles() error {
 
 			if info.ModTime().Before(cutoffTime) {
 				if err := os.Remove(filePath); err == nil {
-					log.Printf("FileCopier: Cleaned up old file: %s", filePath)
+					LogDebug("FileCopier: Cleaned up old file: %s", filePath)
 				}
 			}
 		}
@@ -254,11 +253,11 @@ func loadLastCopiedTimestamp(db *sql.DB) int64 {
 
 	err := db.QueryRow(query).Scan(&lastTs)
 	if err != nil || lastTs == 0 {
-		log.Printf("FileCopier: No previous timestamp found, starting from beginning")
+		LogInfo("FileCopier: No previous timestamp found, starting from beginning")
 		return 0
 	}
 
-	log.Printf("FileCopier: Resuming from timestamp %d", lastTs)
+	LogInfo("FileCopier: Resuming from timestamp %d", lastTs)
 	return lastTs
 }
 
@@ -266,6 +265,6 @@ func loadLastCopiedTimestamp(db *sql.DB) int64 {
 func (fc *FileCopier) saveLastCopiedTimestamp() error {
 	// For now, we'll just log it. In a production system, you might want to store this
 	// in a separate table or configuration file
-	log.Printf("FileCopier: Last copied timestamp: %d", fc.lastCopiedTs)
+	LogDebug("FileCopier: Last copied timestamp: %d", fc.lastCopiedTs)
 	return nil
 }

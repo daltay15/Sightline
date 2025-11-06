@@ -2,7 +2,6 @@ package internal
 
 import (
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/disk"
@@ -69,16 +68,16 @@ func NewDiskMonitor(config map[string]interface{}) *DiskMonitor {
 // Start begins the disk monitoring goroutine
 func (dm *DiskMonitor) Start() {
 	if !dm.enabled {
-		log.Printf("Disk monitoring is disabled")
+		LogInfo("Disk monitoring is disabled")
 		return
 	}
 
-	log.Printf("Starting disk space monitoring (interval: %v)", dm.interval)
+	LogInfo("Starting disk space monitoring (interval: %v)", dm.interval)
 
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Disk monitoring goroutine panicked: %v", r)
+				LogError("Disk monitoring goroutine panicked: %v", r)
 			}
 		}()
 

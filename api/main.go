@@ -6,7 +6,6 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,7 +28,14 @@ import (
 var uiFS embed.FS
 
 func main() {
-	log.Printf("=== Security Camera UI Starting ===")
+	// Initialize logger with INFO level by default
+	// Can be configured via environment variable LOG_LEVEL (DEBUG, INFO, WARN, ERROR, FATAL)
+	logLevelStr := os.Getenv("LOG_LEVEL")
+	if logLevelStr == "" {
+		logLevelStr = "INFO"
+	}
+	internal.InitLogger(internal.GetLogLevelFromString(logLevelStr), "")
+	internal.LogInfo("=== Security Camera UI Starting ===")
 
 	// Use constants from config package
 	rootDir := config.RootDir
@@ -48,7 +54,7 @@ func main() {
 	// Load configuration to get backup interval
 	configManager := internal.NewConfigManager("config.json")
 	if err := configManager.LoadConfig(); err != nil {
-		log.Printf("Warning: Failed to load config, using defaults: %v", err)
+		internal.LogWarn("Failed to load config, using defaults: %v", err)
 	}
 
 	// Get backup settings from config
@@ -67,25 +73,25 @@ func main() {
 		var err error
 		errorNotifier, err = telegram.NewErrorTelegramClient(configData)
 		if err != nil {
-			log.Printf("Warning: Failed to initialize error notification service: %v", err)
+			internal.LogWarn("Failed to initialize error notification service: %v", err)
 			errorNotifier = nil
 		} else {
-			log.Printf("Error notification service initialized successfully")
+			internal.LogInfo("Error notification service initialized successfully")
 		}
 	}
 
 	// Initialize global error notifier
 	internal.InitErrorNotifier(errorNotifier, pythonEndpoint, errorNotificationsEnabled)
 
-	log.Printf("Configuration: rootDir=%s, completedDir=%s, port=%s", rootDir, completedDir, port)
-	log.Printf("Backup settings: enabled=%v, interval=%s", backupEnabled, backupInterval)
+	internal.LogInfo("Configuration: rootDir=%s, completedDir=%s, port=%s", rootDir, completedDir, port)
+	internal.LogInfo("Backup settings: enabled=%v, interval=%s", backupEnabled, backupInterval)
 
 	_ = os.MkdirAll(filepath.Dir(dbPath), 0755)
 	_ = os.MkdirAll(thumbsDir, 0755)
 
 	db, err := internal.OpenDB(dbPath)
 	if err != nil {
-		log.Fatal(err)
+		internal.LogFatal("Failed to open database: %v", err)
 	}
 
 	// ensure schema is present
@@ -127,7 +133,7 @@ func main() {
 
 	`
 	if _, err := db.Exec(schemaSQL); err != nil {
-		log.Fatal("Failed to create schema:", err)
+		internal.LogFatal("Failed to create schema: %v", err)
 	}
 
 	// Add detection columns if they don't exist (migration)
@@ -135,18 +141,18 @@ func main() {
 	var columnExists int
 	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='detection_data'").Scan(&columnExists)
 	if err != nil || columnExists == 0 {
-		log.Printf("Adding detection_data column to events table")
+		internal.LogInfo("Adding detection_data column to events table")
 		if _, err := db.Exec("ALTER TABLE events ADD COLUMN detection_data TEXT"); err != nil {
-			log.Printf("Warning: Failed to add detection_data column: %v", err)
+			internal.LogWarn("Failed to add detection_data column: %v", err)
 		}
 	}
 
 	// Check if detection_updated column exists
 	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='detection_updated'").Scan(&columnExists)
 	if err != nil || columnExists == 0 {
-		log.Printf("Adding detection_updated column to events table")
+		internal.LogInfo("Adding detection_updated column to events table")
 		if _, err := db.Exec("ALTER TABLE events ADD COLUMN detection_updated INTEGER DEFAULT 0"); err != nil {
-			log.Printf("Warning: Failed to add detection_updated column: %v", err)
+			internal.LogWarn("Failed to add detection_updated column: %v", err)
 		}
 	}
 
@@ -154,18 +160,18 @@ func main() {
 	// Check if video_path column exists
 	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='video_path'").Scan(&columnExists)
 	if err != nil || columnExists == 0 {
-		log.Printf("Adding video_path column to events table")
+		internal.LogInfo("Adding video_path column to events table")
 		if _, err := db.Exec("ALTER TABLE events ADD COLUMN video_path TEXT"); err != nil {
-			log.Printf("Warning: Failed to add video_path column: %v", err)
+			internal.LogWarn("Failed to add video_path column: %v", err)
 		}
 	}
 
 	// Check if detection_path column exists
 	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='detection_path'").Scan(&columnExists)
 	if err != nil || columnExists == 0 {
-		log.Printf("Adding detection_path column to events table")
+		internal.LogInfo("Adding detection_path column to events table")
 		if _, err := db.Exec("ALTER TABLE events ADD COLUMN detection_path TEXT"); err != nil {
-			log.Printf("Warning: Failed to add detection_path column: %v", err)
+			internal.LogWarn("Failed to add detection_path column: %v", err)
 		}
 	}
 
@@ -177,7 +183,7 @@ func main() {
 		CREATE INDEX IF NOT EXISTS idx_events_camera_path ON events(camera, path);
 	`
 	if _, err := db.Exec(indexSQL); err != nil {
-		log.Printf("Warning: Failed to create detection indexes: %v", err)
+		internal.LogWarn("Failed to create detection indexes: %v", err)
 	}
 
 	// Initialize retention manager (after DB is ready)
@@ -196,13 +202,14 @@ func main() {
 	// Serve embedded UI files
 	sub, err := fs.Sub(uiFS, "ui")
 	if err != nil {
-		log.Fatal("Failed to create UI filesystem:", err)
+		internal.LogFatal("Failed to create UI filesystem: %v", err)
 	}
 	r.StaticFS("/ui", http.FS(sub))
 	r.GET("/", func(c *gin.Context) { c.Redirect(http.StatusFound, "/ui/detections.html") })
 
 	// (optional) health/stats
 	r.GET("/health", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
+	r.HEAD("/health", func(c *gin.Context) { c.Status(200) })
 	r.GET("/stats", func(c *gin.Context) {
 		var n int64
 		_ = db.QueryRow("SELECT COUNT(*) FROM events").Scan(&n)
@@ -624,7 +631,7 @@ func main() {
 		// Load current configuration from file
 		configManager := internal.NewConfigManager("config.json")
 		if err := configManager.LoadConfig(); err != nil {
-			log.Printf("Warning: Failed to load config for API: %v", err)
+			internal.LogWarn("Failed to load config for API: %v", err)
 		}
 
 		// Return current configuration from file
@@ -635,7 +642,8 @@ func main() {
 	r.POST("/api/config", func(c *gin.Context) {
 		var newConfig map[string]interface{}
 		if err := c.ShouldBindJSON(&newConfig); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid JSON"})
+			internal.LogError("Failed to parse JSON in config save request: %v", err)
+			c.JSON(400, gin.H{"error": "Invalid JSON", "details": err.Error()})
 			return
 		}
 
@@ -643,18 +651,31 @@ func main() {
 		configFile := "config.json"
 		configData, err := json.MarshalIndent(newConfig, "", "  ")
 		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to marshal config"})
+			internal.LogError("Failed to marshal config to JSON: %v", err)
+			c.JSON(500, gin.H{"error": "Failed to marshal config", "details": err.Error()})
 			return
 		}
 
+		// Ensure directory exists before writing
+		configDir := filepath.Dir(configFile)
+		if configDir != "." && configDir != "" {
+			if err := os.MkdirAll(configDir, 0755); err != nil {
+				internal.LogError("Failed to create config directory %s: %v", configDir, err)
+				c.JSON(500, gin.H{"error": "Failed to create config directory", "details": err.Error()})
+				return
+			}
+		}
+
 		if err := os.WriteFile(configFile, configData, 0644); err != nil {
-			c.JSON(500, gin.H{"error": "Failed to save config"})
+			internal.LogError("Failed to write config file %s: %v", configFile, err)
+			c.JSON(500, gin.H{"error": "Failed to save config", "details": err.Error()})
 			return
 		}
 
 		// Reload config so other services can pick up changes
 		if err := configManager.LoadConfig(); err != nil {
-			log.Printf("Warning: Failed to reload config after save: %v", err)
+			internal.LogWarn("Failed to reload config after save: %v", err)
+			// Don't fail the request if reload fails, just warn
 		}
 
 		// Update backup manager with new settings if they changed
@@ -666,7 +687,7 @@ func main() {
 
 		// Update retention manager with new settings (will take effect on next scheduled run)
 		// The retention manager checks settings before each run, so it will pick up changes
-		log.Printf("Configuration saved. Retention settings will take effect on next scheduled run (nightly at 2 AM)")
+		internal.LogInfo("Configuration saved. Retention settings will take effect on next scheduled run (nightly at 2 AM)")
 
 		c.JSON(200, gin.H{"message": "Configuration saved successfully"})
 	})
@@ -833,7 +854,7 @@ func main() {
 	})
 
 	go func() {
-		log.Printf("HTTP server on %s", port)
+		internal.LogInfo("HTTP server on %s", port)
 		server := &http.Server{
 			Addr:         port,
 			Handler:      r,
@@ -841,14 +862,14 @@ func main() {
 			WriteTimeout: 30 * time.Second,
 			IdleTimeout:  120 * time.Second,
 		}
-		log.Fatal(server.ListenAndServe())
+		internal.LogFatal("HTTP server failed: %v", server.ListenAndServe())
 	}()
 
 	// Detection processing
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Detection processing goroutine panicked: %v", r)
+				internal.LogError("Detection processing goroutine panicked: %v", r)
 			}
 		}()
 
@@ -857,7 +878,7 @@ func main() {
 
 		for {
 			if err := detectionProcessor.ProcessCompletedFiles(); err != nil {
-				log.Printf("Detection processing error: %v", err)
+				internal.LogError("Detection processing error: %v", err)
 			}
 
 			time.Sleep(time.Duration(config.DetectionInterval))
@@ -867,10 +888,10 @@ func main() {
 	// File system monitoring (file watcher or polling based on config)
 	if config.FileWatcherEnabled {
 		// Real-time file watcher (replaces polling)
-		log.Printf("Starting real-time file watcher")
+		internal.LogInfo("Starting real-time file watcher")
 		fileWatcher := internal.NewFileWatcher(db, rootDir, thumbsDir, pendingDir, telegramURL)
 		if err := fileWatcher.Start(); err != nil {
-			log.Fatalf("Failed to start file watcher: %v", err)
+			internal.LogFatal("Failed to start file watcher: %v", err)
 		}
 		defer fileWatcher.Stop()
 
@@ -881,52 +902,52 @@ func main() {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("Watcher signal processor panicked: %v", r)
+					internal.LogError("Watcher signal processor panicked: %v", r)
 				}
 			}()
 
-			log.Printf("Starting watcher signal processor")
+			internal.LogInfo("Starting watcher signal processor")
 			for {
 				// Check for file watcher signals every 100ms for immediate processing
 				if err := processWatcherSignals(db, rootDir, thumbsDir, pendingDir); err != nil {
-					log.Printf("Error processing watcher signals: %v", err)
+					internal.LogError("Error processing watcher signals: %v", err)
 				}
 				time.Sleep(100 * time.Millisecond)
 			}
 		}()
 	} else {
-		log.Printf("File watcher disabled, using polling approach")
+		internal.LogInfo("File watcher disabled, using polling approach")
 	}
 
 	// Background scans (frequency depends on file watcher setting)
-	log.Printf("About to start background scanning goroutine")
+	internal.LogDebug("About to start background scanning goroutine")
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Scanning goroutine panicked: %v", r)
+				internal.LogError("Scanning goroutine panicked: %v", r)
 			}
 		}()
 
-		log.Printf("Starting background scanning goroutine")
+		internal.LogInfo("Starting background scanning goroutine")
 		for {
-			log.Printf("Background scan iteration starting")
+			internal.LogDebug("Background scan iteration starting")
 			if err := indexer.ScanAllParallel(db, indexer.Config{
 				Root: rootDir, ThumbsDir: thumbsDir, PendingDir: pendingDir, MaxWorkers: config.MaxWorkers, BatchSize: config.BatchSize,
 				ThumbnailWorkers: config.ThumbnailWorkers,
 			}); err != nil {
-				log.Printf("scan error: %v", err)
+				internal.LogError("scan error: %v", err)
 			}
 
 			// Check how many events we have
 			var count int64
 			_ = db.QueryRow("SELECT COUNT(*) FROM events").Scan(&count)
-			log.Printf("total events in database: %d", count)
+			internal.LogDebug("total events in database: %d", count)
 
 			// Pre-generate thumbnails for better performance
 			if err := indexer.PreGenerateThumbnails(db, indexer.Config{
 				Root: rootDir, ThumbsDir: thumbsDir, ThumbnailWorkers: config.ThumbnailWorkers,
 			}); err != nil {
-				log.Printf("thumbnail generation error: %v", err)
+				internal.LogError("thumbnail generation error: %v", err)
 			}
 
 			// Different intervals based on file watcher setting
@@ -944,7 +965,7 @@ func main() {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Detection scanning goroutine panicked: %v", r)
+				internal.LogError("Detection scanning goroutine panicked: %v", r)
 			}
 		}()
 
@@ -957,7 +978,7 @@ func main() {
 				IndexDetections: true,
 				TelegramURL:     telegramURL,
 			}); err != nil {
-				log.Printf("detection image scan error: %v", err)
+				internal.LogError("detection image scan error: %v", err)
 			}
 
 			time.Sleep(time.Duration(config.ScanInterval))
@@ -971,7 +992,7 @@ func main() {
 	// Start the retention manager (always start, regardless of file watcher status)
 	retentionManager.StartRetentionScheduler()
 
-	log.Printf("All goroutines started, entering select loop")
+	internal.LogInfo("All goroutines started, entering select loop")
 	select {}
 }
 
@@ -991,7 +1012,7 @@ func processWatcherSignals(db *sql.DB, rootDir, thumbsDir, pendingDir string) er
 	}
 
 	filePath := string(content)
-	log.Printf("Processing watcher signal for file: %s", filePath)
+	internal.LogDebug("Processing watcher signal for file: %s", filePath)
 
 	// Process the specific file immediately
 	cfg := indexer.Config{
@@ -1005,13 +1026,13 @@ func processWatcherSignals(db *sql.DB, rootDir, thumbsDir, pendingDir string) er
 
 	// Use the existing indexer to process this specific file
 	if err := indexer.ProcessSingleFile(db, cfg, filePath); err != nil {
-		log.Printf("Error processing watcher signal file %s: %v", filePath, err)
+		internal.LogError("Error processing watcher signal file %s: %v", filePath, err)
 		return err
 	}
 
 	// Remove the signal file
 	os.Remove(signalFile)
 
-	log.Printf("Successfully processed watcher signal for: %s", filePath)
+	internal.LogDebug("Successfully processed watcher signal for: %s", filePath)
 	return nil
 }

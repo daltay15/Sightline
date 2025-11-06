@@ -3,7 +3,6 @@ package internal
 import (
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,23 +35,23 @@ func NewBackupManager(dbPath string, backupDir string, enabled bool, interval st
 func (bm *BackupManager) UpdateSettings(enabled bool, interval string) {
 	bm.enabled = enabled
 	bm.interval = interval
-	log.Printf("Backup settings updated: enabled=%v, interval=%s", enabled, interval)
+	LogInfo("Backup settings updated: enabled=%v, interval=%s", enabled, interval)
 }
 
 // StartBackupScheduler starts the backup scheduler
 func (bm *BackupManager) StartBackupScheduler() {
 	if !bm.enabled {
-		log.Printf("Database backup is disabled")
+		LogInfo("Database backup is disabled")
 		return
 	}
 
 	// Create backup directory if it doesn't exist
 	if err := os.MkdirAll(bm.backupDir, 0755); err != nil {
-		log.Printf("Failed to create backup directory: %v", err)
+		LogError("Failed to create backup directory: %v", err)
 		return
 	}
 
-	log.Printf("Database backup scheduler started (interval: %s)", bm.interval)
+	LogInfo("Database backup scheduler started (interval: %s)", bm.interval)
 
 	// Start backup goroutine
 	go func() {
@@ -61,14 +60,14 @@ func (bm *BackupManager) StartBackupScheduler() {
 			nextBackup := bm.calculateNextBackup()
 			waitTime := time.Until(nextBackup)
 
-			log.Printf("Next database backup scheduled in %v", waitTime)
+			LogDebug("Next database backup scheduled in %v", waitTime)
 			time.Sleep(waitTime)
 
 			// Perform backup
 			if err := bm.CreateBackup(); err != nil {
-				log.Printf("Database backup failed: %v", err)
+				LogError("Database backup failed: %v", err)
 			} else {
-				log.Printf("Database backup completed successfully")
+				LogInfo("Database backup completed successfully")
 			}
 		}
 	}()
@@ -101,10 +100,10 @@ func (bm *BackupManager) CreateBackup() error {
 
 	// Clean up old backups
 	if err := bm.cleanupOldBackups(); err != nil {
-		log.Printf("Warning: failed to cleanup old backups: %v", err)
+		LogWarn("Failed to cleanup old backups: %v", err)
 	}
 
-	log.Printf("Database backup created: %s", backupPath)
+	LogInfo("Database backup created: %s", backupPath)
 	return nil
 }
 
@@ -165,12 +164,12 @@ func (bm *BackupManager) cleanupOldBackups() error {
 	// Remove old backups if we have more than maxBackups
 	if len(backupFiles) > bm.maxBackups {
 		for i := bm.maxBackups; i < len(backupFiles); i++ {
-			oldBackupPath := filepath.Join(bm.backupDir, backupFiles[i].Name())
-			if err := os.Remove(oldBackupPath); err != nil {
-				log.Printf("Failed to remove old backup: %s", oldBackupPath)
-			} else {
-				log.Printf("Removed old backup: %s", oldBackupPath)
-			}
+		oldBackupPath := filepath.Join(bm.backupDir, backupFiles[i].Name())
+		if err := os.Remove(oldBackupPath); err != nil {
+			LogWarn("Failed to remove old backup: %s", oldBackupPath)
+		} else {
+			LogDebug("Removed old backup: %s", oldBackupPath)
+		}
 		}
 	}
 
@@ -243,7 +242,7 @@ func (bm *BackupManager) RestoreBackup(backupPath string) error {
 	// Create a backup of current database before restoring
 	currentBackupPath := fmt.Sprintf("%s.before_restore_%s", bm.dbPath, time.Now().Format("2006-01-02_15-04-05"))
 	if err := bm.copyFile(bm.dbPath, currentBackupPath); err != nil {
-		log.Printf("Warning: failed to backup current database before restore: %v", err)
+		LogWarn("Failed to backup current database before restore: %v", err)
 	}
 
 	// Restore from backup
@@ -251,7 +250,7 @@ func (bm *BackupManager) RestoreBackup(backupPath string) error {
 		return fmt.Errorf("failed to restore from backup: %v", err)
 	}
 
-	log.Printf("Database restored from backup: %s", backupPath)
+	LogInfo("Database restored from backup: %s", backupPath)
 	return nil
 }
 

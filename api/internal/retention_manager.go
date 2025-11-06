@@ -3,7 +3,6 @@ package internal
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,23 +37,23 @@ func (rm *RetentionManager) UpdateSettings() {
 	rm.enabled = rm.configManager.GetBool("retention_enabled", false)
 	rm.unit = rm.configManager.GetString("retention_unit", "day")
 	rm.amount = rm.configManager.GetInt("retention_amount", 30)
-	log.Printf("Retention settings updated: enabled=%v, keep last %d %s(s)", rm.enabled, rm.amount, rm.unit)
+	LogInfo("Retention settings updated: enabled=%v, keep last %d %s(s)", rm.enabled, rm.amount, rm.unit)
 }
 
 // StartRetentionScheduler starts the retention scheduler (runs nightly)
 func (rm *RetentionManager) StartRetentionScheduler() {
 	if !rm.enabled {
-		log.Printf("Data retention is disabled")
+		LogInfo("Data retention is disabled")
 		return
 	}
 
-	log.Printf("Data retention scheduler started (keeping last %d %s(s))", rm.amount, rm.unit)
+	LogInfo("Data retention scheduler started (keeping last %d %s(s))", rm.amount, rm.unit)
 
 	// Start retention goroutine
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Retention manager panicked: %v", r)
+				LogError("Retention manager panicked: %v", r)
 			}
 		}()
 
@@ -68,7 +67,7 @@ func (rm *RetentionManager) StartRetentionScheduler() {
 			}
 
 			waitTime := time.Until(nextRun)
-			log.Printf("Next data retention check scheduled in %v (at %s)", waitTime, nextRun.Format("2006-01-02 15:04:05"))
+			LogDebug("Next data retention check scheduled in %v (at %s)", waitTime, nextRun.Format("2006-01-02 15:04:05"))
 
 			time.Sleep(waitTime)
 
@@ -78,9 +77,9 @@ func (rm *RetentionManager) StartRetentionScheduler() {
 			if rm.enabled {
 				// Perform retention cleanup
 				if err := rm.PerformRetentionCleanup(); err != nil {
-					log.Printf("Data retention cleanup failed: %v", err)
+					LogError("Data retention cleanup failed: %v", err)
 				} else {
-					log.Printf("Data retention cleanup completed successfully")
+					LogInfo("Data retention cleanup completed successfully")
 					rm.lastRun = time.Now()
 				}
 			}
@@ -94,7 +93,7 @@ func (rm *RetentionManager) PerformRetentionCleanup() error {
 		return fmt.Errorf("retention is disabled")
 	}
 
-	log.Printf("Starting data retention cleanup: keeping last %d %s(s)", rm.amount, rm.unit)
+	LogInfo("Starting data retention cleanup: keeping last %d %s(s)", rm.amount, rm.unit)
 
 	// Calculate the cutoff timestamp (everything before this should be deleted)
 	now := time.Now()
@@ -113,7 +112,7 @@ func (rm *RetentionManager) PerformRetentionCleanup() error {
 
 	cutoffTs := cutoffTime.Unix()
 
-	log.Printf("Deleting data older than %s (timestamp: %d)", cutoffTime.Format("2006-01-02 15:04:05"), cutoffTs)
+	LogInfo("Deleting data older than %s (timestamp: %d)", cutoffTime.Format("2006-01-02 15:04:05"), cutoffTs)
 
 	// Use the same deletion logic as the manual delete endpoint
 	return rm.deleteDataByTimestamp(cutoffTs)
@@ -153,11 +152,11 @@ func (rm *RetentionManager) deleteDataByTimestamp(cutoffTs int64) error {
 	}
 
 	if len(baseEvents) == 0 {
-		log.Printf("No data to delete (all data is within retention period)")
+		LogInfo("No data to delete (all data is within retention period)")
 		return nil
 	}
 
-	log.Printf("Found %d events to delete", len(baseEvents))
+	LogInfo("Found %d events to delete", len(baseEvents))
 
 	// Build list of IDs for deletion (base events)
 	ids := make([]int64, 0, len(baseEvents))
@@ -231,7 +230,7 @@ func (rm *RetentionManager) deleteDataByTimestamp(cutoffTs int64) error {
 		if err := os.RemoveAll(dayFolder); err == nil || os.IsNotExist(err) {
 			deletedFolders++
 		} else {
-			log.Printf("Failed to delete day folder %s: %v", dayFolder, err)
+			LogError("Failed to delete day folder %s: %v", dayFolder, err)
 		}
 	}
 
@@ -300,7 +299,7 @@ func (rm *RetentionManager) deleteDataByTimestamp(cutoffTs int64) error {
 		}
 	}
 
-	log.Printf("Retention cleanup completed: deleted %d day folder(s), %d month folder(s), %d base events, %d detection events, %d detection artifacts",
+	LogInfo("Retention cleanup completed: deleted %d day folder(s), %d month folder(s), %d base events, %d detection events, %d detection artifacts",
 		deletedFolders, deletedMonthFolders, len(ids), len(detectionEventIDs), cleanedDetections)
 
 	return nil

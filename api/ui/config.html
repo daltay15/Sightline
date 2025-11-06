@@ -1098,8 +1098,25 @@
                     showStatus('Configuration saved successfully', 'success');
                     currentConfig = config;
                 } else {
-                    const error = await response.text();
-                    showStatus('Failed to save configuration: ' + error, 'error');
+                    // Try to parse JSON error response
+                    let errorMessage = 'Unknown error';
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        try {
+                            const errorData = await response.json();
+                            errorMessage = errorData.error || errorData.message || 'Unknown error';
+                            if (errorData.details) {
+                                errorMessage += ': ' + errorData.details;
+                            }
+                        } catch (e) {
+                            errorMessage = 'Failed to parse error response';
+                        }
+                    } else {
+                        // Fallback to text if not JSON
+                        errorMessage = await response.text();
+                    }
+                    console.error('Failed to save configuration:', errorMessage);
+                    showStatus('Failed to save configuration: ' + errorMessage, 'error');
                 }
             } catch (error) {
                 console.error('Error saving configuration:', error);

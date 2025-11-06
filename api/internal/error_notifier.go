@@ -2,7 +2,6 @@ package internal
 
 import (
 	"fmt"
-	"log"
 	"runtime"
 	"time"
 
@@ -43,7 +42,7 @@ func NotifyError(severity, component, message string, metadata map[string]interf
 	// Send to Python endpoint (which forwards to Telegram)
 	if globalErrorNotifier.telegramClient != nil {
 		if err := globalErrorNotifier.telegramClient.SendErrorWithData(severity, component, message, metadata); err != nil {
-			log.Printf("Failed to send error notification via Python endpoint: %v", err)
+			LogError("Failed to send error notification via Python endpoint: %v", err)
 		}
 	}
 }
@@ -64,7 +63,7 @@ func NotifyErrorWithStack(severity, component, message string, metadata map[stri
 	// Send to Python endpoint (which forwards to Telegram)
 	if globalErrorNotifier.telegramClient != nil {
 		if err := globalErrorNotifier.telegramClient.SendErrorNotification(severity, component, message, metadata, stack, ""); err != nil {
-			log.Printf("Failed to send error notification via Python endpoint: %v", err)
+			LogError("Failed to send error notification via Python endpoint: %v", err)
 		}
 	}
 }
