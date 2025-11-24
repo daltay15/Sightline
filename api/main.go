@@ -458,14 +458,25 @@ func main() {
 		}
 
 		// Get real NAS drive info
+		// Use rootDir (camera directory) to determine NAS mount point
+		// This works in Docker where /mnt/nas might not exist
 		var nasDiskTotal, nasDiskFree, nasDiskUsed uint64
 		var nasDiskError string
-		if nasDiskInfo, err := disk.Usage("/mnt/nas"); err == nil {
+		// Try rootDir first (e.g., /mnt/nas/pool/Cameras/House), then fall back to /mnt/nas
+		nasPath := rootDir
+		if nasDiskInfo, err := disk.Usage(nasPath); err == nil {
 			nasDiskTotal = nasDiskInfo.Total
 			nasDiskFree = nasDiskInfo.Free
 			nasDiskUsed = nasDiskInfo.Used
 		} else {
-			nasDiskError = err.Error()
+			// Fall back to /mnt/nas if rootDir path fails
+			if nasDiskInfo, err := disk.Usage("/mnt/nas"); err == nil {
+				nasDiskTotal = nasDiskInfo.Total
+				nasDiskFree = nasDiskInfo.Free
+				nasDiskUsed = nasDiskInfo.Used
+			} else {
+				nasDiskError = err.Error()
+			}
 		}
 
 		// Get real CPU usage

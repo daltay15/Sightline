@@ -15,6 +15,7 @@ type DiskMonitor struct {
 	systemCriticalThreshold float64
 	nasWarningThreshold     float64
 	nasCriticalThreshold    float64
+	nasPath                 string // Path to NAS mount point (configurable)
 	lastSystemWarning       time.Time
 	lastSystemCritical      time.Time
 	lastNasWarning          time.Time
@@ -54,6 +55,15 @@ func NewDiskMonitor(config map[string]interface{}) *DiskMonitor {
 		nasCritical = 95
 	}
 
+	// Get NAS path from config, with fallback logic
+	// Try camera_dir first (e.g., /mnt/nas/pool/Cameras/House), then nas_path, then default
+	nasPath := "/mnt/nas"
+	if cameraDir, ok := config["camera_dir"].(string); ok && cameraDir != "" {
+		nasPath = cameraDir
+	} else if nasPathConfig, ok := config["nas_path"].(string); ok && nasPathConfig != "" {
+		nasPath = nasPathConfig
+	}
+
 	return &DiskMonitor{
 		enabled:                 enabled,
 		interval:                interval,
@@ -61,6 +71,7 @@ func NewDiskMonitor(config map[string]interface{}) *DiskMonitor {
 		systemCriticalThreshold: systemCritical,
 		nasWarningThreshold:     nasWarning,
 		nasCriticalThreshold:    nasCritical,
+		nasPath:                 nasPath,
 		notificationCooldown:    30 * time.Minute, // Prevent spam
 	}
 }
@@ -138,14 +149,32 @@ func (dm *DiskMonitor) checkSystemDiskSpace() {
 	}
 }
 
-// checkNASDiskSpace monitors the NAS disk (/mnt/nas)
+// checkNASDiskSpace monitors the NAS disk
 func (dm *DiskMonitor) checkNASDiskSpace() {
-	diskInfo, err := disk.Usage("/mnt/nas")
+	// Use configured NAS path, with fallback to /mnt/nas
+	nasPath := dm.nasPath
+	if nasPath == "" {
+		nasPath = "/mnt/nas"
+	}
+
+	diskInfo, err := disk.Usage(nasPath)
 	if err != nil {
-		NotifyError("error", "disk_monitor", "Failed to get NAS disk usage", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return
+		// Fall back to /mnt/nas if configured path fails
+		if nasPath != "/mnt/nas" {
+			if diskInfo, err = disk.Usage("/mnt/nas"); err != nil {
+				NotifyError("error", "disk_monitor", "Failed to get NAS disk usage", map[string]interface{}{
+					"error":    err.Error(),
+					"nas_path": nasPath,
+				})
+				return
+			}
+		} else {
+			NotifyError("error", "disk_monitor", "Failed to get NAS disk usage", map[string]interface{}{
+				"error":    err.Error(),
+				"nas_path": nasPath,
+			})
+			return
+		}
 	}
 
 	usedPercent := float64(diskInfo.Used) / float64(diskInfo.Total) * 100
@@ -189,7 +218,17 @@ func (dm *DiskMonitor) GetStatus() map[string]interface{} {
 
 	// Get current disk usage
 	systemInfo, systemErr := disk.Usage("/")
-	nasInfo, nasErr := disk.Usage("/mnt/nas")
+
+	// Use configured NAS path, with fallback to /mnt/nas
+	nasPath := dm.nasPath
+	if nasPath == "" {
+		nasPath = "/mnt/nas"
+	}
+	nasInfo, nasErr := disk.Usage(nasPath)
+	// Fall back to /mnt/nas if configured path fails
+	if nasErr != nil && nasPath != "/mnt/nas" {
+		nasInfo, nasErr = disk.Usage("/mnt/nas")
+	}
 
 	status := map[string]interface{}{
 		"enabled":                   dm.enabled,
