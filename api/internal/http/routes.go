@@ -2229,19 +2229,13 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 			}
 		}
 
-		// Send detection notification via Telegram
-		if err := telegramClient.SendDetection(detectionData, chat); err != nil {
-			internal.NotifyError("error", "detection_ingest", "Failed to send detection notification", map[string]interface{}{
-				"error":   err.Error(),
-				"payload": payload,
-			})
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
+		// NOTE: Telegram is NOT sent here to avoid duplicate notifications.
+		// Python already sends directly to /telegram/send_detection when disable_telegram=False.
+		// This endpoint only handles database ingestion.
 
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "success",
-			"message": "Detection notification sent",
+			"message": "Detection data ingested",
 			"chat":    chat,
 		})
 	})

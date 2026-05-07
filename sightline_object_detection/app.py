@@ -31,6 +31,7 @@ import json
 import os  # NEW: env config must happen before torch import
 import requests
 import base64
+import threading
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -475,7 +476,7 @@ class YOLODetector:
 # --------- API Integration ---------
 
 def send_detection_to_telegram(detection_result: DetectionResult, original_path: str, 
-                              telegram_endpoint: str, camera_name: str = None) -> Optional[bool]:
+                              telegram_endpoint: str, camera_name: str = None, timeout: float = 10.0) -> Optional[bool]:
     """
     Send detection data directly to Telegram endpoint for immediate alerting.
     
@@ -484,6 +485,7 @@ def send_detection_to_telegram(detection_result: DetectionResult, original_path:
         original_path: Path to the original image file
         telegram_endpoint: Telegram endpoint URL
         camera_name: Optional camera name for the alert
+        timeout: Request timeout in seconds (default 10s)
         
     Returns:
         True if successful, False if failed, None if no person detected (no telegram sent)
@@ -552,8 +554,10 @@ def send_detection_to_telegram(detection_result: DetectionResult, original_path:
             payload["annotated_image_path"] = detection_result.annotated_path
         
         logging.info(f"Sending detection alert to Telegram")
-        response = requests.post(telegram_endpoint, json=payload, timeout=30)
-        logging.info(f"Telegram response: {response}")
+        t0 = time.time()
+        response = requests.post(telegram_endpoint, json=payload, timeout=timeout)
+        elapsed = time.time() - t0
+        logging.info(f"Telegram response: {response} (took {elapsed:.2f}s)")
         
         if response.status_code == 200:
             result = response.json()
@@ -571,10 +575,10 @@ def send_detection_to_telegram(detection_result: DetectionResult, original_path:
         return False
 
 def send_detection_to_api(original_path: str, annotated_path: str, detection_data_path: Dict[str, Any], 
-                         api_endpoint: str, success: bool = True) -> Dict[str, Any]:
+                         api_endpoint: str, success: bool = True, max_retries: int = 3, timeout: float = 10.0) -> Dict[str, Any]:
     """
     Send detection data to the API endpoint with retry logic.
-    Will halt everything and retry until it succeeds.
+    Limited retries to prevent indefinite blocking.
     
     Args:
         original_path: Path to the original image file
@@ -582,9 +586,11 @@ def send_detection_to_api(original_path: str, annotated_path: str, detection_dat
         detection_data: Detection results data
         api_endpoint: API endpoint URL
         success: Whether the detection was successful
+        max_retries: Maximum number of retry attempts (default 3)
+        timeout: Request timeout in seconds (default 10s)
         
     Returns:
-        API response data (guaranteed to succeed)
+        API response data or None if all retries failed
     """
     payload = {
         "original_path": original_path,
@@ -596,10 +602,13 @@ def send_detection_to_api(original_path: str, annotated_path: str, detection_dat
     
     retry_count = 0
     
-    while True:  # Infinite retries
+    while retry_count <= max_retries:  # Limited retries to prevent indefinite blocking
         try:
-            logging.info(f"📡 Sending detection data to API (attempt {retry_count + 1}): {api_endpoint}")
-            response = requests.post(api_endpoint, json=payload, timeout=30)
+            logging.info(f"📡 Sending detection data to API (attempt {retry_count + 1}/{max_retries + 1}): {api_endpoint}")
+            t0 = time.time()
+            response = requests.post(api_endpoint, json=payload, timeout=timeout)
+            elapsed = time.time() - t0
+            logging.info(f"✅ API response: {response.status_code} (took {elapsed:.2f}s)")
             
             if response.status_code == 200:
                 result = response.json()
@@ -607,20 +616,69 @@ def send_detection_to_api(original_path: str, annotated_path: str, detection_dat
                 return result
             else:
                 logging.error(f"❌ API request failed with status {response.status_code}: {response.text}")
-                logging.warning(f"🔄 Retrying in 5 seconds... (attempt {retry_count + 1})")
-                time.sleep(5)
-                retry_count += 1
+                if retry_count < max_retries:
+                    logging.warning(f"🔄 Retrying in 2 seconds... (attempt {retry_count + 1}/{max_retries + 1})")
+                    time.sleep(2)
+                    retry_count += 1
+                else:
+                    logging.error(f"❌ All {max_retries + 1} API attempts failed. Giving up.")
+                    return {"status": "error", "message": f"API failed after {max_retries + 1} attempts"}
                 
         except requests.exceptions.RequestException as e:
             logging.error(f"❌ Failed to send data to API: {e}")
-            logging.warning(f"🔄 Retrying in 5 seconds... (attempt {retry_count + 1})")
-            time.sleep(5)
-            retry_count += 1
+            if retry_count < max_retries:
+                logging.warning(f"🔄 Retrying in 2 seconds... (attempt {retry_count + 1}/{max_retries + 1})")
+                time.sleep(2)
+                retry_count += 1
+            else:
+                logging.error(f"❌ All {max_retries + 1} API attempts failed. Giving up.")
+                return {"status": "error", "message": f"API failed after {max_retries + 1} attempts"}
         except Exception as e:
             logging.error(f"❌ Unexpected error sending data to API: {e}")
-            logging.warning(f"🔄 Retrying in 5 seconds... (attempt {retry_count + 1})")
-            time.sleep(5)
-            retry_count += 1
+            if retry_count < max_retries:
+                logging.warning(f"🔄 Retrying in 2 seconds... (attempt {retry_count + 1}/{max_retries + 1})")
+                time.sleep(2)
+                retry_count += 1
+            else:
+                logging.error(f"❌ All {max_retries + 1} API attempts failed. Giving up.")
+                return {"status": "error", "message": f"API failed after {max_retries + 1} attempts"}
+
+# --------- Async Helper Functions ---------
+
+def _send_telegram_sync(detection_result, original_path, telegram_endpoint):
+    """Synchronous Telegram sender for use in background threads."""
+    try:
+        result = send_detection_to_telegram(
+            detection_result=detection_result,
+            original_path=original_path,
+            telegram_endpoint=telegram_endpoint,
+            timeout=10.0
+        )
+        if result is True:
+            logging.info("🚨 Telegram alert sent (async)")
+        elif result is False:
+            logging.error("❌ Telegram alert failed (async)")
+    except Exception as e:
+        logging.error(f"❌ Telegram async thread error: {e}")
+
+def _send_api_sync(original_path, annotated_path, detection_data, api_endpoint):
+    """Synchronous API sender for use in background threads."""
+    try:
+        result = send_detection_to_api(
+            original_path=original_path,
+            annotated_path=annotated_path,
+            detection_data=detection_data,
+            api_endpoint=api_endpoint,
+            success=True,
+            max_retries=3,
+            timeout=10.0
+        )
+        if result and result.get("status") != "error":
+            logging.info("✅ Detection data sent to API successfully (async)")
+        elif result:
+            logging.error(f"❌ API async call failed: {result.get('message')}")
+    except Exception as e:
+        logging.error(f"❌ API async thread error: {e}")
 
 # --------- Pipeline ---------
 
@@ -664,18 +722,22 @@ def process_one(img_in_pending: Path, base: Path, runner, topk: int, api_endpoin
         logging.info("Moved to processing: %s", processing_path)
 
         if isinstance(runner, YOLODetector):
+            t_detect_start = time.time()
             det = runner.detect(processing_path)
+            detect_time = time.time() - t_detect_start
+            logging.info(f"⚡ Detection completed in {detect_time:.2f}s")
+            
+            # Send Telegram alert asynchronously to avoid blocking the pipeline
             if not disable_telegram and telegram_endpoint:
-                telegram_result = send_detection_to_telegram(
-                    detection_result=det,
-                    original_path=str(processing_path),
-                    telegram_endpoint=telegram_endpoint
-                )
-                if telegram_result is True:
-                    logging.info("🚨 Telegram alert sent")
-                elif telegram_result is False:
-                    logging.error("❌ Telegram alert failed")
-                # Don't log anything if telegram_result is None (no person detected)
+                try:
+                    telegram_thread = threading.Thread(
+                        target=_send_telegram_sync,
+                        args=(det, str(processing_path), telegram_endpoint),
+                        daemon=True
+                    )
+                    telegram_thread.start()
+                except Exception as e:
+                    logging.error(f"Failed to start Telegram thread: {e}")
 
             stem = processing_path.stem
             json_path = processing_path.with_suffix("").parent / f"{stem}.json"
@@ -692,27 +754,31 @@ def process_one(img_in_pending: Path, base: Path, runner, topk: int, api_endpoin
             }
             write_json(json_path, payload)
 
-            # Send detection data to API if enabled
+            # Send detection data to API asynchronously to avoid blocking
             if not disable_api and api_endpoint:
-                detection_data = {
-                    "detections": det.dets,
-                    "duration_ms": round(det.duration_ms, 2),
-                    "imgsz": runner.imgsz,
-                    "conf": runner.conf,
-                    "iou": runner.iou,
-                }
-                api_result = send_detection_to_api(
-                    original_path=str(processing_path),
-                    annotated_path=str(ann_path),
-                    detection_data=detection_data,
-                    api_endpoint=api_endpoint,
-                    success=True
-                )
-                logging.info("✅ Detection data sent to API successfully")
+                try:
+                    api_thread = threading.Thread(
+                        target=_send_api_sync,
+                        args=(str(processing_path), str(ann_path), {
+                            "detections": det.dets,
+                            "duration_ms": round(det.duration_ms, 2),
+                            "imgsz": runner.imgsz,
+                            "conf": runner.conf,
+                            "iou": runner.iou,
+                        }, api_endpoint),
+                        daemon=True
+                    )
+                    api_thread.start()
+                except Exception as e:
+                    logging.error(f"Failed to start API thread: {e}")
 
+            # Move files to completed (track I/O time)
+            t_io_start = time.time()
             for p in (json_path, ann_path):
                 dest = completed_dir / p.name
                 move(p, dest)
+            io_time = time.time() - t_io_start
+            logging.info(f"📁 I/O completed in {io_time:.2f}s")
             
             if not getattr(runner, "skip_delete", False) and processing_path.exists():
                 processing_path.unlink()
@@ -805,18 +871,17 @@ def process_batch(batch_imgs: List[Path], base: Path, runner, topk: int, skip_de
             def process_single_result(args):
                 processing_path, det, completed_dir = args
                 
-                # Send Telegram alert immediately after detection (ASAP alerting)
+                # Send Telegram alert asynchronously to avoid blocking
                 if not disable_telegram and telegram_endpoint:
-                    telegram_result = send_detection_to_telegram(
-                        detection_result=det,
-                        original_path=str(processing_path),
-                        telegram_endpoint=telegram_endpoint
-                    )
-                    if telegram_result is True:
-                        logging.info("🚨 Telegram alert sent for detection")
-                    elif telegram_result is False:
-                        logging.error("❌ Telegram alert failed")
-                    # Don't log anything if telegram_result is None (no person detected)
+                    try:
+                        telegram_thread = threading.Thread(
+                            target=_send_telegram_sync,
+                            args=(det, str(processing_path), telegram_endpoint),
+                            daemon=True
+                        )
+                        telegram_thread.start()
+                    except Exception as e:
+                        logging.error(f"Failed to start Telegram thread: {e}")
                 
                 stem = processing_path.stem
                 json_path = processing_path.with_suffix("").parent / f"{stem}.json"
@@ -833,27 +898,31 @@ def process_batch(batch_imgs: List[Path], base: Path, runner, topk: int, skip_de
                 }
                 write_json(json_path, payload)
 
-                # Send detection data to API if enabled
+                # Send detection data to API asynchronously to avoid blocking
                 if not disable_api and api_endpoint:
-                    detection_data = {
-                        "detections": det.dets,
-                        "duration_ms": round(det.duration_ms, 2),
-                        "imgsz": runner.imgsz,
-                        "conf": runner.conf,
-                        "iou": runner.iou,
-                    }
-                    api_result = send_detection_to_api(
-                        original_path=str(processing_path),
-                        annotated_path=str(ann_path),
-                        detection_data=detection_data,
-                        api_endpoint=api_endpoint,
-                        success=True
-                    )
-                    logging.info("✅ Detection data sent to API successfully")
+                    try:
+                        api_thread = threading.Thread(
+                            target=_send_api_sync,
+                            args=(str(processing_path), str(ann_path), {
+                                "detections": det.dets,
+                                "duration_ms": round(det.duration_ms, 2),
+                                "imgsz": runner.imgsz,
+                                "conf": runner.conf,
+                                "iou": runner.iou,
+                            }, api_endpoint),
+                            daemon=True
+                        )
+                        api_thread.start()
+                    except Exception as e:
+                        logging.error(f"Failed to start API thread: {e}")
 
+                # Move files to completed (track I/O time)
+                t_io_start = time.time()
                 for p in (json_path, ann_path):
                     dest = completed_dir / p.name
                     move(p, dest)
+                io_time = time.time() - t_io_start
+                logging.info(f"📁 I/O completed in {io_time:.2f}s")
                 
                 if not skip_delete and processing_path.exists():
                     try:
