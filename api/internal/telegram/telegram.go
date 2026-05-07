@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -51,7 +52,7 @@ func NewTelegramClient(config map[string]interface{}) (*TelegramClient, error) {
 	return &TelegramClient{
 		token:  token,
 		chats:  chats,
-		client: &http.Client{Timeout: 40 * time.Second},
+		client: &http.Client{Timeout: 15 * time.Second}, // Reduced from 40s to avoid long blocking
 	}, nil
 }
 
@@ -409,6 +410,15 @@ func (tc *TelegramClient) GetChats() map[string]string {
 
 // SendDetection sends a detection notification to Telegram
 func (tc *TelegramClient) SendDetection(payload map[string]interface{}, chat string) error {
+	t0 := time.Now()
+	defer func() {
+		elapsed := time.Since(t0)
+		if elapsed > 1*time.Second {
+			log.Printf("[TELEGRAM] SendDetection took %v (slow!)", elapsed)
+		} else {
+			log.Printf("[TELEGRAM] SendDetection took %v", elapsed)
+		}
+	}()
 	caption := formatDetectionCaption(payload)
 
 	// Check for base64 encoded image
@@ -489,7 +499,7 @@ func NewErrorTelegramClient(config map[string]interface{}) (*ErrorTelegramClient
 
 	return &ErrorTelegramClient{
 		pythonEndpoint: pythonEndpoint,
-		client:         &http.Client{Timeout: 40 * time.Second},
+		client:         &http.Client{Timeout: 15 * time.Second}, // Reduced from 40s to avoid long blocking
 	}, nil
 }
 
