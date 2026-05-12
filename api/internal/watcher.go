@@ -1,7 +1,9 @@
 package internal
 
 import (
+	"crypto/sha1"
 	"database/sql"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,8 +113,18 @@ func (fw *FileWatcher) processEvents() {
 func (fw *FileWatcher) handleEvent(event fsnotify.Event) {
 	fw.eventCount++
 
-	// Only process write events (file creation/modification)
-	if !event.Has(fsnotify.Write) {
+	if event.Has(fsnotify.Create) {
+		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+			if err := fw.addSubdirectories(event.Name); err != nil {
+				fw.logger.Warn("Failed to watch new directory %s: %v", event.Name, err)
+			}
+			return
+		}
+	}
+
+	// Process file creation and write events. Some filesystems emit only one of
+	// these reliably for camera output, especially across network mounts.
+	if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) {
 		return
 	}
 
@@ -196,12 +208,8 @@ func (fw *FileWatcher) processFile(filePath string) {
 		}
 	}()
 
-	// Wait a moment for file to be stable (reduced from 500ms to 100ms for speed)
-	time.Sleep(100 * time.Millisecond)
-
-	// Check if file is stable
-	if !fw.isFileStable(filePath) {
-		fw.logger.Debug("File not stable yet, skipping: %s", filePath)
+	if !fw.waitForFileStable(filePath, 5*time.Second) {
+		fw.logger.Debug("File not stable after retry window, leaving for fallback scan: %s", filePath)
 		return
 	}
 
@@ -228,16 +236,33 @@ func (fw *FileWatcher) processFile(filePath string) {
 
 // triggerImmediateProcessing creates a signal to trigger immediate processing
 func (fw *FileWatcher) triggerImmediateProcessing(filePath string) {
-	// Create a signal file that the background scanner can detect
-	signalFile := filepath.Join(fw.pendingDir, ".watcher_signal")
+	signalDir := filepath.Join(fw.pendingDir, ".watcher_signals")
+	if err := os.MkdirAll(signalDir, 0755); err != nil {
+		fw.logger.Error("Failed to create signal directory: %v", err)
+		return
+	}
 
-	// Write the file path to the signal file
+	sum := sha1.Sum([]byte(filePath))
+	signalFile := filepath.Join(signalDir, time.Now().Format("20060102150405.000000000")+"_"+hex.EncodeToString(sum[:])+".signal")
 	if err := os.WriteFile(signalFile, []byte(filePath), 0644); err != nil {
 		fw.logger.Error("Failed to create signal file: %v", err)
 		return
 	}
 
 	fw.logger.Debug("Triggered immediate processing for: %s", filePath)
+}
+
+func (fw *FileWatcher) waitForFileStable(filePath string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if fw.isFileStable(filePath) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 // isFileStable checks if a file is stable (not being written to)
