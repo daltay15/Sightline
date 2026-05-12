@@ -1009,23 +1009,25 @@ func main() {
 
 // processWatcherSignals processes files that were detected by the file watcher
 func processWatcherSignals(db *sql.DB, rootDir, thumbsDir, pendingDir string) error {
-	signalFile := filepath.Join(pendingDir, ".watcher_signal")
+	legacySignalFile := filepath.Join(pendingDir, ".watcher_signal")
+	signalDir := filepath.Join(pendingDir, ".watcher_signals")
 
-	// Check if signal file exists
-	if _, err := os.Stat(signalFile); os.IsNotExist(err) {
-		return nil // No signal file
+	var signalFiles []string
+	if _, err := os.Stat(legacySignalFile); err == nil {
+		signalFiles = append(signalFiles, legacySignalFile)
+	}
+	if entries, err := os.ReadDir(signalDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			signalFiles = append(signalFiles, filepath.Join(signalDir, entry.Name()))
+		}
+	}
+	if len(signalFiles) == 0 {
+		return nil
 	}
 
-	// Read the file path from signal file
-	content, err := os.ReadFile(signalFile)
-	if err != nil {
-		return err
-	}
-
-	filePath := string(content)
-	internal.LogDebug("Processing watcher signal for file: %s", filePath)
-
-	// Process the specific file immediately
 	cfg := indexer.Config{
 		Root:             rootDir,
 		ThumbsDir:        thumbsDir,
@@ -1035,15 +1037,35 @@ func processWatcherSignals(db *sql.DB, rootDir, thumbsDir, pendingDir string) er
 		ThumbnailWorkers: 1,
 	}
 
-	// Use the existing indexer to process this specific file
-	if err := indexer.ProcessSingleFile(db, cfg, filePath); err != nil {
-		internal.LogError("Error processing watcher signal file %s: %v", filePath, err)
-		return err
+	for _, signalFile := range signalFiles {
+		content, err := os.ReadFile(signalFile)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+
+		filePath := string(content)
+		internal.LogDebug("Processing watcher signal for file: %s", filePath)
+		if filePath == "" {
+			os.Remove(signalFile)
+			continue
+		}
+		if _, err := os.Stat(filePath); err != nil {
+			if os.IsNotExist(err) {
+				os.Remove(signalFile)
+				continue
+			}
+		}
+
+		if err := indexer.ProcessSingleFile(db, cfg, filePath); err != nil {
+			internal.LogError("Error processing watcher signal file %s: %v", filePath, err)
+			continue
+		}
+
+		os.Remove(signalFile)
+		internal.LogDebug("Successfully processed watcher signal for: %s", filePath)
 	}
-
-	// Remove the signal file
-	os.Remove(signalFile)
-
-	internal.LogDebug("Successfully processed watcher signal for: %s", filePath)
 	return nil
 }
