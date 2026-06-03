@@ -10,19 +10,24 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 // DetectionProcessor handles processing of detection files from the Python script
 type DetectionProcessor struct {
-	db            *sql.DB
-	pendingDir    string
-	processingDir string
-	failedDir     string
-	completedDir  string
-	lastDebugTime time.Time
-	logger        *Logger
-	telegramURL   string // URL for the Telegram bot API
+	db                    *sql.DB
+	pendingDir            string
+	processingDir         string
+	failedDir             string
+	completedDir          string
+	lastDebugTime         time.Time
+	lastCompletedScanTime time.Time
+	completedScanRunning  bool
+	processedJSONFiles    map[string]time.Time
+	mu                    sync.Mutex
+	logger                *Logger
+	telegramURL           string // URL for the Telegram bot API
 }
 
 // DetectionFile represents the JSON structure from the Python script
@@ -50,13 +55,14 @@ func NewDetectionProcessor(db *sql.DB, pendingDir, processingDir, completedDir, 
 		LogWarn("Failed to open detection processor log file: %v", err)
 		// Fall back to stdout logger if file logging fails
 		return &DetectionProcessor{
-			db:            db,
-			pendingDir:    pendingDir,
-			processingDir: processingDir,
-			completedDir:  completedDir,
-			failedDir:     failedDir,
-			telegramURL:   telegramURL,
-			logger:        NewLogger(INFO, "[DETECTION] ", os.Stdout),
+			db:                 db,
+			pendingDir:         pendingDir,
+			processingDir:      processingDir,
+			completedDir:       completedDir,
+			failedDir:          failedDir,
+			telegramURL:        telegramURL,
+			processedJSONFiles: make(map[string]time.Time),
+			logger:             NewLogger(INFO, "[DETECTION] ", os.Stdout),
 		}
 	}
 
@@ -65,19 +71,23 @@ func NewDetectionProcessor(db *sql.DB, pendingDir, processingDir, completedDir, 
 	detectionLogger := NewLogger(INFO, "[DETECTION] ", multiWriter)
 
 	return &DetectionProcessor{
-		db:            db,
-		pendingDir:    pendingDir,
-		processingDir: processingDir,
-		completedDir:  completedDir,
-		failedDir:     failedDir,
-		telegramURL:   telegramURL,
-		logger:        detectionLogger,
+		db:                 db,
+		pendingDir:         pendingDir,
+		processingDir:      processingDir,
+		completedDir:       completedDir,
+		failedDir:          failedDir,
+		telegramURL:        telegramURL,
+		processedJSONFiles: make(map[string]time.Time),
+		logger:             detectionLogger,
 	}
 }
 
 // ProcessCompletedFiles scans the completed directory for new detection files
 func (dp *DetectionProcessor) ProcessCompletedFiles() error {
-	dp.logger.Info("=== DetectionProcessor: Starting scan of completed directory: %s", dp.completedDir)
+	if !dp.beginCompletedScan() {
+		return nil
+	}
+	defer dp.finishCompletedScan()
 
 	// Check if completed directory exists
 	if _, err := os.Stat(dp.completedDir); os.IsNotExist(err) {
@@ -93,6 +103,7 @@ func (dp *DetectionProcessor) ProcessCompletedFiles() error {
 
 	jsonFileCount := 0
 	processedCount := 0
+	skippedCount := 0
 	errorCount := 0
 
 	// Walk through the completed directory looking for JSON files
@@ -106,8 +117,12 @@ func (dp *DetectionProcessor) ProcessCompletedFiles() error {
 			return err
 		}
 
-		// Skip directories
+		// Skip directories. Archived detections are already ingested and should not be
+		// part of the hot completed-directory scan.
 		if d.IsDir() {
+			if d.Name() == "archive" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
@@ -118,6 +133,35 @@ func (dp *DetectionProcessor) ProcessCompletedFiles() error {
 
 		jsonFileCount++
 
+		info, statErr := d.Info()
+		if statErr != nil {
+			dp.logger.Error("Error reading detection file info %s: %v", path, statErr)
+			errorCount++
+			return nil
+		}
+
+		if dp.isCompletedJSONCached(path, info.ModTime()) {
+			if _, err := dp.archiveDetectionFile(path, strings.TrimSuffix(path, ".json")+".jpg"); err != nil {
+				dp.logger.Warn("Cached detection JSON was skipped but failed to archive %s: %v", path, err)
+			}
+			skippedCount++
+			return nil
+		}
+
+		// Avoid reading and unmarshalling old JSON files on every scan. Most files in
+		// completedDir have already been ingested, so a cheap event ID check lets us
+		// cache and skip them quickly on future scans.
+		if eventID, extractErr := dp.extractEventIDFromFilename(path); extractErr == nil {
+			if dp.eventAlreadyHasDetections(eventID) {
+				if _, err := dp.archiveDetectionFile(path, strings.TrimSuffix(path, ".json")+".jpg"); err != nil {
+					dp.logger.Warn("Already-ingested detection JSON was skipped but failed to archive %s: %v", path, err)
+				}
+				dp.markCompletedJSONCached(path, info.ModTime())
+				skippedCount++
+				return nil
+			}
+		}
+
 		// Process the detection file
 		if err := dp.processDetectionFile(path); err != nil {
 			dp.logger.Error("Error processing detection file %s: %v", path, err)
@@ -125,15 +169,18 @@ func (dp *DetectionProcessor) ProcessCompletedFiles() error {
 			return nil // Continue processing other files
 		}
 
+		dp.markCompletedJSONCached(path, info.ModTime())
 		processedCount++
 
-		// Small delay to reduce database contention
+		// Small delay only for files that actually needed processing.
 		time.Sleep(10 * time.Millisecond)
 
 		return nil
 	})
 
-	dp.logger.Info("=== DetectionProcessor: Scan complete - Found %d JSON files, processed %d, errors %d", jsonFileCount, processedCount, errorCount)
+	if jsonFileCount > 0 || processedCount > 0 || skippedCount > 0 || errorCount > 0 {
+		dp.logger.Info("=== DetectionProcessor: Scan complete - Found %d JSON files, processed %d, skipped %d, errors %d", jsonFileCount, processedCount, skippedCount, errorCount)
+	}
 
 	// Log recent detection updates for debugging
 	if processedCount > 0 {
@@ -142,6 +189,35 @@ func (dp *DetectionProcessor) ProcessCompletedFiles() error {
 		dp.logger.Debug("=== DetectionProcessor: Recent detection updates in last minute: %d", recentUpdates)
 	}
 	return err
+}
+
+// beginCompletedScan prevents overlapping completed-directory scans and throttles
+// repeated scans. New detections are still picked up frequently, but the API will
+// no longer walk tens of thousands of old JSON files multiple times per second.
+func (dp *DetectionProcessor) beginCompletedScan() bool {
+	const minScanInterval = 1 * time.Second
+	now := time.Now()
+
+	dp.mu.Lock()
+	defer dp.mu.Unlock()
+
+	if dp.completedScanRunning {
+		return false
+	}
+
+	if !dp.lastCompletedScanTime.IsZero() && now.Sub(dp.lastCompletedScanTime) < minScanInterval {
+		return false
+	}
+
+	dp.completedScanRunning = true
+	dp.lastCompletedScanTime = now
+	return true
+}
+
+func (dp *DetectionProcessor) finishCompletedScan() {
+	dp.mu.Lock()
+	dp.completedScanRunning = false
+	dp.mu.Unlock()
 }
 
 // processDetectionFile processes a single detection JSON file
@@ -184,8 +260,12 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 		return nil
 	}
 
-	// Check if this event already has detection data to prevent duplicates
+	// Check if this event already has detection data to prevent duplicates.
+	// If the JSON still exists in completed/, archive it so completed/ stays a hot inbox.
 	if dp.eventAlreadyHasDetections(eventID) {
+		if _, err := dp.archiveDetectionFile(jsonPath, detectionFile.AnnotatedImage); err != nil {
+			dp.logger.Warn("Duplicate detection JSON was skipped but failed to archive %s: %v", jsonPath, err)
+		}
 		return nil
 	}
 
@@ -208,6 +288,19 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 	if detectionImagePath == "" {
 		// Fallback: construct path from the JSON file path
 		detectionImagePath = strings.TrimSuffix(jsonPath, ".json") + ".jpg"
+	}
+
+	archivedDetectionImagePath, archiveErr := dp.archiveDetectionFile(jsonPath, detectionImagePath)
+	if archiveErr != nil {
+		dp.logger.Warn("Detection processed but failed to archive JSON %s: %v", jsonPath, archiveErr)
+	} else if archivedDetectionImagePath != "" {
+		detectionImagePath = archivedDetectionImagePath
+		detectionFile.AnnotatedImage = archivedDetectionImagePath
+		if updatedDetectionJSON, marshalErr := json.Marshal(detectionFile); marshalErr == nil {
+			detectionJSON = updatedDetectionJSON
+		} else {
+			dp.logger.Warn("Detection archived but failed to update marshaled detection path for event %d: %v", eventID, marshalErr)
+		}
 	}
 
 	// Retry logic for database locks
@@ -255,6 +348,96 @@ func (dp *DetectionProcessor) processDetectionFile(jsonPath string) error {
 	// Note: Telegram notifications are now handled by the indexer when processing detection images
 
 	return nil
+}
+
+func (dp *DetectionProcessor) archiveDetectionFile(jsonPath string, detectionImagePath string) (string, error) {
+	archiveDir := filepath.Join(dp.completedDir, "archive", time.Now().Format("2006/01/02"))
+	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create detection archive dir: %w", err)
+	}
+
+	archivedImagePath := ""
+
+	// Move common sibling artifacts if they exist. Move image candidates before the
+	// JSON so the returned path can be stored in the event row.
+	baseWithoutExt := strings.TrimSuffix(jsonPath, ".json")
+	siblingCandidates := []string{
+		detectionImagePath,
+		baseWithoutExt + ".jpg",
+		baseWithoutExt + ".jpeg",
+		baseWithoutExt + "_det.jpg",
+		baseWithoutExt + "_det.jpeg",
+	}
+
+	seen := make(map[string]struct{}, len(siblingCandidates))
+	for _, src := range siblingCandidates {
+		if src == "" {
+			continue
+		}
+		if _, exists := seen[src]; exists {
+			continue
+		}
+		seen[src] = struct{}{}
+
+		if _, err := os.Stat(src); err == nil {
+			dst := filepath.Join(archiveDir, filepath.Base(src))
+			if err := moveFileReplacing(src, dst); err != nil {
+				dp.logger.Warn("Failed to archive detection sibling %s: %v", src, err)
+				continue
+			}
+
+			if src == detectionImagePath || archivedImagePath == "" {
+				archivedImagePath = dst
+			}
+		}
+	}
+
+	jsonDst := filepath.Join(archiveDir, filepath.Base(jsonPath))
+	if err := moveFileReplacing(jsonPath, jsonDst); err != nil {
+		return archivedImagePath, fmt.Errorf("failed to archive detection JSON: %w", err)
+	}
+
+	return archivedImagePath, nil
+}
+
+func moveFileReplacing(src, dst string) error {
+	if src == dst {
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+
+	// Remove destination first so os.Rename works even if a previous copy exists.
+	_ = os.Remove(dst)
+
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+
+	// Fallback for cross-device moves.
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+
+	if err := out.Close(); err != nil {
+		return err
+	}
+
+	return os.Remove(src)
 }
 
 // extractEventIDFromFilename extracts the event ID from a filename
@@ -621,4 +804,20 @@ func (dp *DetectionProcessor) HasPersonDetection(detectionFile DetectionFile) bo
 		}
 	}
 	return false
+}
+
+// isCompletedJSONCached checks if a JSON file with the given path and modTime has already been processed
+func (dp *DetectionProcessor) isCompletedJSONCached(path string, modTime time.Time) bool {
+	dp.mu.Lock()
+	defer dp.mu.Unlock()
+
+	lastModTime, exists := dp.processedJSONFiles[path]
+	return exists && lastModTime.Equal(modTime)
+}
+
+// markCompletedJSONCached marks a JSON file as processed with its modTime
+func (dp *DetectionProcessor) markCompletedJSONCached(path string, modTime time.Time) {
+	dp.mu.Lock()
+	dp.processedJSONFiles[path] = modTime
+	dp.mu.Unlock()
 }

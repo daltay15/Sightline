@@ -189,43 +189,38 @@ func processFilesParallel(db *sql.DB, cfg Config, files []string) error {
 	return nil
 }
 
-// ScanDetectionImages scans and indexes detection images from the GPU processing completed directory
+// ScanDetectionImages scans and indexes detection images from the GPU processing completed directory.
+// This legacy indexer only scans the top level of DetectionDir.
+// Archived detections under completed/archive/YYYY/MM/DD are already linked on the
+// original events through detection_path, so recursively walking archive/ can burn
+// CPU by re-checking tens of thousands of old _det.jpg files forever.
 func ScanDetectionImages(db *sql.DB, cfg Config) error {
 	if !cfg.IndexDetections || cfg.DetectionDir == "" {
 		return nil
 	}
 
-	// Check if detection directory exists
-	if _, err := os.Stat(cfg.DetectionDir); os.IsNotExist(err) {
-		return nil
-	}
-
-	var detectionFiles []string
-	err := filepath.WalkDir(cfg.DetectionDir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	entries, err := os.ReadDir(cfg.DetectionDir)
+	if err != nil {
+		if os.IsNotExist(err) {
 			return nil
 		}
-		lower := strings.ToLower(p)
-		// Look for detection images with _det suffix
-		if strings.HasSuffix(lower, "_det.jpg") || strings.HasSuffix(lower, "_det.jpeg") {
-			detectionFiles = append(detectionFiles, p)
-		}
-		return nil
-	})
-	if err != nil {
-		internal.LogError("Error walking detection directory: %v", err)
+		internal.LogError("Error reading detection directory: %v", err)
 		return err
 	}
 
-	if len(detectionFiles) == 0 {
-		return nil
-	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
 
-	// Process detection images
-	for _, file := range detectionFiles {
+		name := strings.ToLower(entry.Name())
+		if !(strings.HasSuffix(name, "_det.jpg") || strings.HasSuffix(name, "_det.jpeg")) {
+			continue
+		}
+
+		file := filepath.Join(cfg.DetectionDir, entry.Name())
 		if err := indexDetectionFile(db, cfg, file); err != nil {
 			internal.LogError("Error indexing detection file %s: %v", file, err)
-			// Continue processing other files
 		}
 	}
 

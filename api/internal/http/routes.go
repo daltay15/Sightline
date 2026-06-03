@@ -45,6 +45,48 @@ func formatBytes(bytes int64) string {
 	return fmt.Sprintf("%.2f %s", size, units[exp])
 }
 
+// resolveExistingDetectionPath returns a path that exists for a detection image.
+// It first tries the path stored in the DB. If that is stale, it falls back to
+// looking for the same basename in completed/ and completed/archive/**.
+func resolveExistingDetectionPath(candidatePath string, completedDir string) (string, bool) {
+	if candidatePath == "" {
+		return "", false
+	}
+
+	if _, err := os.Stat(candidatePath); err == nil {
+		return candidatePath, true
+	}
+
+	baseName := filepath.Base(candidatePath)
+	if baseName == "." || baseName == string(filepath.Separator) || baseName == "" {
+		return "", false
+	}
+
+	directCompletedPath := filepath.Join(completedDir, baseName)
+	if _, err := os.Stat(directCompletedPath); err == nil {
+		return directCompletedPath, true
+	}
+
+	archiveDir := filepath.Join(completedDir, "archive")
+	var foundPath string
+	_ = filepath.WalkDir(archiveDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || foundPath != "" {
+			return nil
+		}
+		if d.Name() == baseName {
+			foundPath = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+
+	if foundPath != "" {
+		return foundPath, true
+	}
+
+	return "", false
+}
+
 // PreparedStatements holds cached prepared statements for better performance
 type PreparedStatements struct {
 	GetThumbPath   *sql.Stmt
@@ -354,11 +396,28 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 	r.GET("/detection/:id", func(c *gin.Context) {
 		id := c.Param("id")
 
-		// Check if this is a detection event ID (camera = 'DETECTION')
+		// Prefer the canonical detection_path on the base event first.
+		// Older code only looked in completed/ or DETECTION pseudo-events, which breaks
+		// after detections are archived under completed/archive/YYYY/MM/DD.
 		var detectionPath string
 
+		err := db.QueryRow("SELECT COALESCE(detection_path, '') FROM events WHERE id = ?", id).Scan(&detectionPath)
+		if err == nil && detectionPath != "" {
+			if resolvedPath, ok := resolveExistingDetectionPath(detectionPath, config.CompletedDir); ok {
+				c.Header("Cache-Control", "public, max-age=3600")
+				c.Header("ETag", `"detection_`+id+`"`)
+				if c.GetHeader("If-None-Match") == `"detection_`+id+`"` {
+					c.Status(http.StatusNotModified)
+					return
+				}
+				http.ServeFile(c.Writer, c.Request, resolvedPath)
+				return
+			}
+			fmt.Printf("Detection path from events.detection_path not found for ID %s: %s\n", id, detectionPath)
+		}
+
 		// First check if this ID is a detection event itself
-		err := db.QueryRow("SELECT path FROM events WHERE id = ? AND camera = 'DETECTION'", id).Scan(&detectionPath)
+		err = db.QueryRow("SELECT path FROM events WHERE id = ? AND camera = 'DETECTION'", id).Scan(&detectionPath)
 		if err != nil {
 			// If not a detection event, look for detection event linked to this original event
 			err = db.QueryRow(`
@@ -381,29 +440,41 @@ func Routes(r *gin.Engine, db *sql.DB, configManager *internal.ConfigManager) {
 				// Parse detection data to get annotated image path
 				var detectionFile struct {
 					AnnotatedImage string `json:"annotated_image"`
+					Image          string `json:"image"`
 				}
 				if err := json.Unmarshal([]byte(detectionData), &detectionFile); err != nil {
 					c.Status(http.StatusNotFound)
 					return
 				}
 
-				if detectionFile.AnnotatedImage == "" {
+				if detectionFile.AnnotatedImage != "" {
+					if filepath.IsAbs(detectionFile.AnnotatedImage) {
+						detectionPath = detectionFile.AnnotatedImage
+					} else {
+						detectionPath = filepath.Join(config.CompletedDir, detectionFile.AnnotatedImage)
+					}
+				} else if detectionFile.Image != "" {
+					if filepath.IsAbs(detectionFile.Image) {
+						detectionPath = detectionFile.Image
+					} else {
+						detectionPath = filepath.Join(config.CompletedDir, detectionFile.Image)
+					}
+				} else {
 					c.Status(http.StatusNotFound)
 					return
 				}
-
-				// Construct the full path to the annotated image
-				detectionPath = filepath.Join("/mnt/nas/pool/Cameras/GPU_Processing/completed", detectionFile.AnnotatedImage)
 			}
 		}
 
-		// Check if file actually exists
-		if _, err := os.Stat(detectionPath); os.IsNotExist(err) {
-			// Log the attempted path for debugging
+		// Check if file actually exists. If the DB path is stale, try to find the
+		// same filename under completed/ or completed/archive/**.
+		resolvedPath, ok := resolveExistingDetectionPath(detectionPath, config.CompletedDir)
+		if !ok {
 			fmt.Printf("Detection image not found: %s\n", detectionPath)
 			c.Status(http.StatusNotFound)
 			return
 		}
+		detectionPath = resolvedPath
 
 		// Add caching headers for better performance
 		c.Header("Cache-Control", "public, max-age=3600") // 1 hour cache for detection images

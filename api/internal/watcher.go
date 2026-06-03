@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -21,6 +22,8 @@ type FileWatcher struct {
 	pendingDir     string
 	telegramURL    string
 	processedFiles map[string]time.Time
+	inFlightFiles  map[string]struct{}
+	mu             sync.Mutex
 	logger         *Logger
 	// Health monitoring
 	lastCleanup time.Time
@@ -46,6 +49,7 @@ func NewFileWatcher(db *sql.DB, rootDir, thumbsDir, pendingDir, telegramURL stri
 		pendingDir:     pendingDir,
 		telegramURL:    telegramURL,
 		processedFiles: make(map[string]time.Time),
+		inFlightFiles:  make(map[string]struct{}),
 		logger:         NewLogger(INFO, "[WATCHER] ", os.Stdout),
 		lastCleanup:    time.Now(),
 		eventCount:     0,
@@ -138,8 +142,14 @@ func (fw *FileWatcher) handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	// Check if we've already processed this file recently (avoid duplicates)
-	if fw.isRecentlyProcessed(filePath) {
+	// Images should be processed as quickly as possible. Videos are commonly
+	// written over time by cameras, so debounce repeated write events and allow
+	// only one processor goroutine per path.
+	if strings.HasSuffix(lowerPath, ".mp4") {
+		if fw.shouldSkipVideoEvent(filePath) {
+			return
+		}
+	} else if fw.isRecentlyProcessed(filePath) {
 		return
 	}
 
@@ -149,31 +159,62 @@ func (fw *FileWatcher) handleEvent(event fsnotify.Event) {
 	go fw.processFile(filePath)
 }
 
-// isRecentlyProcessed checks if a file was processed recently to avoid duplicates
-func (fw *FileWatcher) isRecentlyProcessed(filePath string) bool {
+// shouldSkipVideoEvent debounces repeated .mp4 write events and prevents
+// multiple goroutines from waiting on the same still-writing video file.
+func (fw *FileWatcher) shouldSkipVideoEvent(filePath string) bool {
 	now := time.Now()
+
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+
+	if _, exists := fw.inFlightFiles[filePath]; exists {
+		return true
+	}
+
 	if lastProcessed, exists := fw.processedFiles[filePath]; exists {
-		// If processed within last 5 seconds, skip
-		if now.Sub(lastProcessed) < 5*time.Second {
+		if now.Sub(lastProcessed) < 2*time.Minute {
 			return true
 		}
 	}
-	fw.processedFiles[filePath] = now
 
-	// Clean up old entries to prevent memory leak
-	fw.cleanupOldProcessedFiles(now)
+	fw.processedFiles[filePath] = now
+	fw.inFlightFiles[filePath] = struct{}{}
+	fw.cleanupOldProcessedFilesLocked(now)
 
 	return false
 }
 
-// cleanupOldProcessedFiles removes entries older than 1 minute to prevent memory leak
-func (fw *FileWatcher) cleanupOldProcessedFiles(now time.Time) {
-	// Only clean up every 100th call to avoid overhead
+// isRecentlyProcessed checks if a file was processed recently to avoid duplicates.
+// This path is intentionally tuned for images so they still process quickly.
+func (fw *FileWatcher) isRecentlyProcessed(filePath string) bool {
+	now := time.Now()
+
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+
+	if lastProcessed, exists := fw.processedFiles[filePath]; exists {
+		// If processed within last 5 seconds, skip. This keeps images responsive
+		// while still avoiding duplicate create/write events.
+		if now.Sub(lastProcessed) < 5*time.Second {
+			return true
+		}
+	}
+
+	fw.processedFiles[filePath] = now
+	fw.cleanupOldProcessedFilesLocked(now)
+
+	return false
+}
+
+// cleanupOldProcessedFilesLocked removes entries older than 5 minutes to prevent memory leak.
+// fw.mu must already be held by the caller.
+func (fw *FileWatcher) cleanupOldProcessedFilesLocked(now time.Time) {
+	// Only clean up every 100th tracked file to avoid overhead.
 	if len(fw.processedFiles)%100 != 0 {
 		return
 	}
 
-	cutoff := now.Add(-1 * time.Minute)
+	cutoff := now.Add(-5 * time.Minute)
 	cleanedCount := 0
 	for filePath, lastProcessed := range fw.processedFiles {
 		if lastProcessed.Before(cutoff) {
@@ -190,8 +231,14 @@ func (fw *FileWatcher) cleanupOldProcessedFiles(now time.Time) {
 
 // GetHealthStats returns health statistics for monitoring
 func (fw *FileWatcher) GetHealthStats() map[string]interface{} {
+	fw.mu.Lock()
+	processedCount := len(fw.processedFiles)
+	inFlightCount := len(fw.inFlightFiles)
+	fw.mu.Unlock()
+
 	return map[string]interface{}{
-		"processed_files_count": len(fw.processedFiles),
+		"processed_files_count": processedCount,
+		"in_flight_files_count": inFlightCount,
 		"total_events":          fw.eventCount,
 		"error_count":           fw.errorCount,
 		"last_cleanup":          fw.lastCleanup,
@@ -207,8 +254,14 @@ func (fw *FileWatcher) processFile(filePath string) {
 			fw.logger.Error("Panic in processFile for %s: %v", filePath, r)
 		}
 	}()
+	defer fw.markProcessingFinished(filePath)
 
-	if !fw.waitForFileStable(filePath, 5*time.Second) {
+	stableTimeout := 5 * time.Second
+	if strings.HasSuffix(strings.ToLower(filePath), ".mp4") {
+		stableTimeout = 2 * time.Minute
+	}
+
+	if !fw.waitForFileStable(filePath, stableTimeout) {
 		fw.logger.Debug("File not stable after retry window, leaving for fallback scan: %s", filePath)
 		return
 	}
@@ -232,6 +285,16 @@ func (fw *FileWatcher) processFile(filePath string) {
 	// Trigger immediate processing by creating a signal file
 	// This will cause the background scanner to process this file immediately
 	fw.triggerImmediateProcessing(filePath)
+}
+
+func (fw *FileWatcher) markProcessingFinished(filePath string) {
+	if !strings.HasSuffix(strings.ToLower(filePath), ".mp4") {
+		return
+	}
+
+	fw.mu.Lock()
+	delete(fw.inFlightFiles, filePath)
+	fw.mu.Unlock()
 }
 
 // triggerImmediateProcessing creates a signal to trigger immediate processing
@@ -267,21 +330,43 @@ func (fw *FileWatcher) waitForFileStable(filePath string, timeout time.Duration)
 
 // isFileStable checks if a file is stable (not being written to)
 func (fw *FileWatcher) isFileStable(filePath string) bool {
-	info1, err := os.Stat(filePath)
+	lowerPath := strings.ToLower(filePath)
+	if strings.HasSuffix(lowerPath, ".mp4") {
+		return fw.isFileStableAcrossChecks(filePath, 3, 2*time.Second)
+	}
+
+	return fw.isFileStableAcrossChecks(filePath, 1, 100*time.Millisecond)
+}
+
+func (fw *FileWatcher) isFileStableAcrossChecks(filePath string, requiredStableChecks int, delay time.Duration) bool {
+	info, err := os.Stat(filePath)
 	if err != nil {
 		return false
 	}
 
-	// Wait a very short time and check again
-	time.Sleep(100 * time.Millisecond)
+	lastSize := info.Size()
+	lastModTime := info.ModTime()
+	stableChecks := 0
 
-	info2, err := os.Stat(filePath)
-	if err != nil {
-		return false
+	for stableChecks < requiredStableChecks {
+		time.Sleep(delay)
+
+		info, err := os.Stat(filePath)
+		if err != nil {
+			return false
+		}
+
+		if info.Size() == lastSize && info.ModTime().Equal(lastModTime) {
+			stableChecks++
+			continue
+		}
+
+		lastSize = info.Size()
+		lastModTime = info.ModTime()
+		stableChecks = 0
 	}
 
-	// File is stable if size and modification time haven't changed
-	return info1.Size() == info2.Size() && info1.ModTime().Equal(info2.ModTime())
+	return true
 }
 
 // Stop stops the file watcher
